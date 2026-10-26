@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# local sqlite database (MVP data store — see lib/db/client.ts)
+/.data/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

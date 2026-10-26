@@ -1,0 +1,30 @@
+# Local dev/test image only — NOT used to build or run the actual app.
+#
+# Builds and runs the real Next.js app (next build && next start) inside a
+# Lambda-like Linux environment, the same family Vercel Functions run on —
+# see Dockerfile.serverless-test for the sibling tool this complements.
+# Unlike that one (bind-mounts host node_modules, since playwright-core's
+# actual browser binary comes from @sparticuz/chromium at runtime, not a
+# platform-specific native module), this one does a real `npm install`
+# INSIDE the container: @libsql/client pulls in a platform-specific native
+# binary (@libsql/darwin-arm64 on this Mac, @libsql/linux-x64-gnu here) via
+# optionalDependencies, so the host's node_modules would have the wrong one.
+#
+# Build + run via:
+#   npm run test:vercel-build
+FROM public.ecr.aws/lambda/nodejs:22
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm install
+
+COPY . .
+RUN npm run build
+
+ENV PORT=3000
+EXPOSE 3000
+# public.ecr.aws/lambda/nodejs's own ENTRYPOINT is the Lambda Runtime
+# Interface Client, which expects a handler name as its first arg — wrong
+# for running a plain web server. Clear it so CMD runs directly.
+ENTRYPOINT []
+CMD ["npm", "run", "start"]
