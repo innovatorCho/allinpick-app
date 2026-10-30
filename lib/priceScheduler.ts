@@ -1,4 +1,5 @@
 import { listDueTrackedProducts, getProductById, updateSchedulingMeta } from "@/lib/domain/products";
+import { recordError } from "@/lib/domain/errorLogs";
 import { recollectProduct, type Collector } from "@/lib/domain/collection";
 import {
   loadSchedulerSettings,
@@ -206,6 +207,9 @@ async function collectOne(product: Product, collector?: Collector): Promise<Sche
     // one product's DB hiccup must never take down the whole tick or process,
     // same as a crawl failure always has: record it as a normal failed
     // result and let the next tick retry this product naturally.
+    // Normal crawl failures come back as a status, not an exception, so
+    // landing here means something unexpected — worth an admin's look.
+    await recordError({ source: "scheduler:product", error: err, context: { productId: product.id } });
     return {
       productId: product.id,
       name: product.name,
@@ -295,11 +299,12 @@ export async function runOneCycle(collector?: Collector): Promise<void> {
     // listDueTrackedProducts itself failing (DB unreachable before we even
     // got a product list) — the whole tick is a no-op, but the process and
     // the timer must survive; the next tick tries again on its own.
-    if (err instanceof DbConnectionError || err instanceof DbConfigError) {
-      console.error("[price-scheduler] DB 연결 실패로 이번 주기를 건너뜁니다:", err.message);
-    } else {
-      console.error("[price-scheduler] 이번 주기 처리 중 예상치 못한 오류:", err);
-    }
+    // recordError also prints to the console; when the DB itself is down it
+    // can't save the row, and the console line is all that remains.
+    await recordError({
+      source: err instanceof DbConnectionError || err instanceof DbConfigError ? "scheduler:db" : "scheduler:cycle",
+      error: err,
+    });
   } finally {
     state.cycleInProgress = false;
     const finishedAt = new Date();
@@ -371,5 +376,5 @@ export async function updateSchedulerConfig(input: SchedulerConfigInput): Promis
  * cut off the moment the Server Action's response goes out.
  */
 export function runSchedulerNow(): void {
-  runAfterResponse(() => runOneCycle().catch((err) => console.error("[price-scheduler] 실행 오류:", err)));
+  runAfterResponse(() => runOneCycle().catch((err) => recordError({ source: "scheduler:manual-run", error: err })));
 }

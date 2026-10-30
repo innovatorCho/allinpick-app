@@ -1,3 +1,4 @@
+import type { Instrumentation } from "next";
 import { getBaseUrl } from "@/lib/auth/providers";
 import { getCronSecretForSelfPing, shouldSelfPingCronRoutes } from "@/lib/cronAuth";
 
@@ -50,3 +51,25 @@ export async function register(): Promise<void> {
 
   console.log("[self-ping] 로컬 개발용 자동 핑 시작 (가격 재수집 1분마다, 다이제스트 5분마다 — app/api/cron/*)");
 }
+
+/**
+ * Next.js file convention: called for every error the server catches while
+ * rendering a page, running a Server Action, or handling a Route Handler —
+ * i.e. everything nobody caught in a try/catch. Shoppers get the generic
+ * app/error.tsx screen; the real error goes to the admin error log
+ * (/admin/errors). Dynamic import keeps the DB client out of any non-Node
+ * runtime bundle.
+ */
+export const onRequestError: Instrumentation.onRequestError = async (err, request, context) => {
+  if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  const digest =
+    typeof err === "object" && err !== null && "digest" in err ? String((err as { digest: unknown }).digest) : null;
+  const { recordError } = await import("@/lib/domain/errorLogs");
+  await recordError({
+    source: `request:${context.routeType}`,
+    error: err,
+    path: `${request.method} ${request.path}`,
+    digest,
+    context: { routePath: context.routePath, renderSource: context.renderSource },
+  });
+};

@@ -4,6 +4,7 @@ import { listAllProducts, countTrackers } from "@/lib/domain/products";
 import { formatDateTime, formatKrw } from "@/lib/format";
 import { collectStatusLabel } from "@/lib/collectStatusLabels";
 import { SeedDataButton } from "@/components/SeedDataButton";
+import { countOpenErrors } from "@/lib/domain/errorLogs";
 
 export default async function AdminPage() {
   const currentUser = await getCurrentUser();
@@ -13,6 +14,7 @@ export default async function AdminPage() {
 
   const products = await listAllProducts();
   const trackerCounts = await Promise.all(products.map((p) => countTrackers(p.id)));
+  const openErrorCount = await countOpenErrors();
 
   return (
     <div className="flex flex-col gap-6">
@@ -30,6 +32,16 @@ export default async function AdminPage() {
             className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
           >
             알림 관리
+          </Link>
+          <Link
+            href="/admin/errors"
+            className={
+              openErrorCount > 0
+                ? "rounded-lg border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950"
+                : "rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+            }
+          >
+            오류 로그{openErrorCount > 0 ? ` ${openErrorCount}` : ""}
           </Link>
           {process.env.NODE_ENV !== "production" && <SeedDataButton />}
         </div>

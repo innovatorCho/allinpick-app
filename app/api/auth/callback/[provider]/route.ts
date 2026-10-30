@@ -4,6 +4,8 @@ import { exchangeCodeForProfile } from "@/lib/auth/providers";
 import { isAdminEmail } from "@/lib/auth/adminAllowlist";
 import { createOAuthUser, findUserByOAuthAccount, updateOAuthTokens } from "@/lib/domain/users";
 import { createSessionForUser } from "@/lib/session";
+import { recordError } from "@/lib/domain/errorLogs";
+import { loginErrorPath, type LoginErrorCode } from "@/lib/auth/loginErrors";
 import type { OAuthProvider } from "@/lib/domain/types";
 
 const STATE_COOKIE = "allinpick_oauth_state";
@@ -12,20 +14,20 @@ function isSupportedProvider(value: string): value is OAuthProvider {
   return value === "google" || value === "kakao";
 }
 
-function loginError(request: NextRequest, message: string) {
-  return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, request.url));
+function loginError(request: NextRequest, code: LoginErrorCode) {
+  return NextResponse.redirect(new URL(loginErrorPath(code), request.url));
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
   if (!isSupportedProvider(provider)) {
-    return loginError(request, "지원하지 않는 로그인 방식입니다.");
+    return loginError(request, "unsupported");
   }
 
   const searchParams = request.nextUrl.searchParams;
   const providerError = searchParams.get("error");
   if (providerError) {
-    return loginError(request, "로그인이 취소되었습니다.");
+    return loginError(request, "cancelled");
   }
 
   const code = searchParams.get("code");
@@ -36,33 +38,39 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   store.delete(STATE_COOKIE);
 
   if (!code || !state || !expectedState || state !== expectedState) {
-    return loginError(request, "로그인 요청이 유효하지 않습니다. 다시 시도해주세요.");
+    return loginError(request, "expired");
   }
 
   let profile, tokens;
   try {
     ({ profile, tokens } = await exchangeCodeForProfile(provider, code));
   } catch (err) {
-    return loginError(request, err instanceof Error ? err.message : "로그인 처리 중 오류가 발생했습니다.");
+    await recordError({ source: "auth:token-exchange", error: err, path: `GET /api/auth/callback/${provider}`, context: { provider } });
+    return loginError(request, "failed");
   }
 
-  let user = await findUserByOAuthAccount(provider, profile.providerUserId);
-  if (!user) {
-    user = await createOAuthUser({
-      provider,
-      providerUserId: profile.providerUserId,
-      email: profile.email,
-      name: profile.name,
-      isAdmin: isAdminEmail(profile.email),
-      tokens,
-    });
-  } else {
-    // Repeat login: refresh the stored tokens too — e.g. a re-login after the
-    // user enables the talk_message consent item is how an existing account
-    // first gets a token capable of sending KakaoTalk messages.
-    await updateOAuthTokens(provider, profile.providerUserId, tokens);
-  }
+  try {
+    let user = await findUserByOAuthAccount(provider, profile.providerUserId);
+    if (!user) {
+      user = await createOAuthUser({
+        provider,
+        providerUserId: profile.providerUserId,
+        email: profile.email,
+        name: profile.name,
+        isAdmin: isAdminEmail(profile.email),
+        tokens,
+      });
+    } else {
+      // Repeat login: refresh the stored tokens too — e.g. a re-login after the
+      // user enables the talk_message consent item is how an existing account
+      // first gets a token capable of sending KakaoTalk messages.
+      await updateOAuthTokens(provider, profile.providerUserId, tokens);
+    }
 
-  await createSessionForUser(user.id);
+    await createSessionForUser(user.id);
+  } catch (err) {
+    await recordError({ source: "auth:create-session", error: err, path: `GET /api/auth/callback/${provider}`, context: { provider } });
+    return loginError(request, "failed");
+  }
   return NextResponse.redirect(new URL("/", request.url));
 }

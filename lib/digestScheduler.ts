@@ -1,4 +1,5 @@
 import { listUsersWithPriceDropCountToday } from "@/lib/domain/notifications";
+import { recordError } from "@/lib/domain/errorLogs";
 import { hasSentDigestToday } from "@/lib/domain/kakaoDigestLogs";
 import { sendKakaoDigest } from "@/lib/kakaoMessaging";
 import { DbConnectionError, DbConfigError } from "@/lib/db/client";
@@ -56,11 +57,10 @@ export async function runDigestCheck(): Promise<void> {
   try {
     users = await listUsersWithPriceDropCountToday(startOfDayIso);
   } catch (err) {
-    if (err instanceof DbConnectionError || err instanceof DbConfigError) {
-      console.error("[digest-scheduler] DB 연결 실패로 이번 체크를 건너뜁니다:", err.message);
-    } else {
-      console.error("[digest-scheduler] 체크 중 예상치 못한 오류:", err);
-    }
+    await recordError({
+      source: err instanceof DbConnectionError || err instanceof DbConfigError ? "digest:db" : "digest:check",
+      error: err,
+    });
     return;
   }
 
@@ -73,7 +73,7 @@ export async function runDigestCheck(): Promise<void> {
       // One user's failure (DB hiccup checking/recording, or the send itself
       // throwing past sendKakaoDigest's own try/catch somehow) must never
       // stop the rest of today's digests from going out.
-      console.error(`[digest-scheduler] user ${userId} 처리 중 오류:`, err instanceof Error ? err.message : err);
+      await recordError({ source: "digest:user", error: err, userId, context: { dateKey } });
     }
   }
 }

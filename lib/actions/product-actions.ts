@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
+import { recordError } from "@/lib/domain/errorLogs";
 import {
   InvalidOliveYoungUrlError,
   registerProductForUser,
@@ -38,9 +39,11 @@ export async function registerProductAction(
     productId = result.product.id;
   } catch (err) {
     if (err instanceof InvalidOliveYoungUrlError) {
+      // A validation message written for shoppers ("올리브영 상품 URL이 아닙니다" etc.), safe to show as-is.
       return { error: err.message };
     }
-    return { error: err instanceof Error ? err.message : "상품 등록 중 오류가 발생했습니다." };
+    await recordError({ source: "action:registerProduct", error: err, userId: user.id, context: { url } });
+    return { error: "상품을 등록하지 못했어요. 잠시 후 다시 시도해주세요." };
   }
 
   revalidatePath("/", "layout");

@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { randomBytes } from "node:crypto";
-import { buildAuthorizeUrl, OAuthConfigError } from "@/lib/auth/providers";
+import { buildAuthorizeUrl } from "@/lib/auth/providers";
+import { recordError } from "@/lib/domain/errorLogs";
+import { loginErrorPath } from "@/lib/auth/loginErrors";
 import type { OAuthProvider } from "@/lib/domain/types";
 
 const STATE_COOKIE = "allinpick_oauth_state";
@@ -11,10 +13,10 @@ function isSupportedProvider(value: string): value is OAuthProvider {
 }
 
 /** Starts the OAuth flow: sets a CSRF state cookie, redirects to the provider's consent screen. */
-export async function GET(_request: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
+export async function GET(request: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
   const { provider } = await params;
   if (!isSupportedProvider(provider)) {
-    return NextResponse.json({ error: "지원하지 않는 로그인 방식입니다." }, { status: 400 });
+    return NextResponse.redirect(new URL(loginErrorPath("unsupported"), request.url));
   }
 
   const state = randomBytes(16).toString("hex");
@@ -30,7 +32,8 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   try {
     return NextResponse.redirect(buildAuthorizeUrl(provider, state));
   } catch (err) {
-    const message = err instanceof OAuthConfigError ? err.message : "로그인을 시작할 수 없습니다.";
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, _request.url));
+    // Usually a missing OAuth env var (OAuthConfigError) — an admin problem, not the shopper's.
+    await recordError({ source: "auth:start", error: err, path: `GET /api/auth/${provider}`, context: { provider } });
+    return NextResponse.redirect(new URL(loginErrorPath("failed"), request.url));
   }
 }

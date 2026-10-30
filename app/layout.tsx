@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/session";
 import { AuthStatus } from "@/components/AuthStatus";
 import { BrandMarkSvg } from "@/components/BrandMark";
 import { countUnread } from "@/lib/domain/notifications";
+import { countOpenErrors } from "@/lib/domain/errorLogs";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,6 +26,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const currentUser = await getCurrentUser();
   const unreadCount = currentUser ? await countUnread(currentUser.id) : 0;
+  const openErrorCount = currentUser?.role === "admin" ? await countOpenErrors() : 0;
 
   return (
     <html
@@ -58,6 +60,14 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               {currentUser?.role === "admin" && (
                 <Link href="/admin" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
                   관리자
+                  {openErrorCount > 0 && (
+                    <span
+                      title={`미처리 오류 ${openErrorCount}건`}
+                      className="ml-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white"
+                    >
+                      {openErrorCount > 99 ? "99+" : openErrorCount}
+                    </span>
+                  )}
                 </Link>
               )}
             </nav>

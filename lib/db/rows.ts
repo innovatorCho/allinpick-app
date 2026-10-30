@@ -105,3 +105,18 @@ export interface SessionRow {
   expires_at: string;
   created_at: string;
 }
+
+export interface ErrorLogRow {
+  id: number;
+  source: string;
+  message: string;
+  stack: string | null;
+  digest: string | null;
+  path: string | null;
+  user_id: string | null;
+  context: string | null;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
+}

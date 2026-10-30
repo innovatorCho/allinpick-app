@@ -10,6 +10,11 @@ import { runSchedulerNow, updateSchedulerConfig } from "@/lib/priceScheduler";
 import { createNotification } from "@/lib/domain/notifications";
 import { setKakaoTemplate, resetKakaoTemplate } from "@/lib/domain/kakaoTemplates";
 import { DbConnectionError, DbConfigError } from "@/lib/db/client";
+import {
+  resolveErrorLog,
+  reopenErrorLog,
+  deleteResolvedErrorLogsOlderThan,
+} from "@/lib/domain/errorLogs";
 import type { NotificationType } from "@/lib/domain/types";
 
 /** Shared across every FormState-returning action below — a DB-connection
@@ -296,4 +301,36 @@ export async function testServerlessCollectorAction(
   const averageElapsedMs = Math.round(runResults.reduce((sum, r) => sum + r.elapsedMs, 0) / runResults.length);
 
   return { report: { runs: runResults, successCount, totalCount: runs, averageElapsedMs } };
+}
+
+// ── Error log (/admin/errors) ───────────────────────────────────────────────
+
+const RESOLVED_ERROR_RETENTION_DAYS = 30;
+
+export async function resolveErrorLogAction(formData: FormData): Promise<void> {
+  const admin = await requireAdmin();
+  const id = Number(formData.get("id"));
+  if (!Number.isInteger(id) || id <= 0) return;
+  const note = String(formData.get("note") ?? "").trim().slice(0, 500) || null;
+  await resolveErrorLog({
+    id,
+    adminUserId: admin.id,
+    note,
+    includeSameMessage: formData.get("includeSameMessage") === "on",
+  });
+  revalidatePath("/admin", "layout");
+}
+
+export async function reopenErrorLogAction(formData: FormData): Promise<void> {
+  await requireAdmin();
+  const id = Number(formData.get("id"));
+  if (!Number.isInteger(id) || id <= 0) return;
+  await reopenErrorLog(id);
+  revalidatePath("/admin", "layout");
+}
+
+export async function cleanupResolvedErrorLogsAction(): Promise<void> {
+  await requireAdmin();
+  await deleteResolvedErrorLogsOlderThan(RESOLVED_ERROR_RETENTION_DAYS);
+  revalidatePath("/admin/errors");
 }

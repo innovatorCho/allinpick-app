@@ -1,6 +1,9 @@
+import { loginErrorMessage } from "@/lib/auth/loginErrors";
+
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const { error } = await searchParams;
-  const errorMessage = typeof error === "string" ? error : null;
+  // Only fixed messages keyed by code; the query string's text is never printed.
+  const errorMessage = loginErrorMessage(error);
 
   return (
     <div className="mx-auto flex w-full max-w-sm flex-col gap-6 py-12">

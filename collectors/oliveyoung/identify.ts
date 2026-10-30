@@ -37,7 +37,7 @@ function extractGoodsNoFromUrl(url: URL): string {
     return pathMatch[1].toUpperCase();
   }
 
-  throw new InvalidOliveYoungUrlError("URL에서 상품 ID(goodsNo)를 찾을 수 없습니다.");
+  throw new InvalidOliveYoungUrlError("상품 페이지 링크가 아니에요. 올리브영 상품 상세 페이지의 링크를 붙여넣어주세요.");
 }
 
 /** Throws if the URL isn't a parseable OliveYoung product URL. Synchronous — does not follow short links (see `resolveOliveYoungProductId`). */
@@ -46,11 +46,11 @@ export function extractOliveYoungProductId(rawUrl: string): string {
   try {
     url = new URL(rawUrl.trim());
   } catch {
-    throw new InvalidOliveYoungUrlError("올바른 URL 형식이 아닙니다.");
+    throw new InvalidOliveYoungUrlError("링크 형식이 올바르지 않아요. 올리브영 상품 링크를 다시 확인해주세요.");
   }
 
   if (!isOliveYoungHost(url.hostname)) {
-    throw new InvalidOliveYoungUrlError("올리브영(oliveyoung.co.kr) 상품 URL만 등록할 수 있습니다.");
+    throw new InvalidOliveYoungUrlError("올리브영 상품 링크만 등록할 수 있어요.");
   }
 
   return extractGoodsNoFromUrl(url);
@@ -130,7 +130,7 @@ export async function resolveOliveYoungProductId(rawUrl: string): Promise<string
   try {
     url = new URL(rawUrl.trim());
   } catch {
-    throw new InvalidOliveYoungUrlError("올바른 URL 형식이 아닙니다.");
+    throw new InvalidOliveYoungUrlError("링크 형식이 올바르지 않아요. 올리브영 상품 링크를 다시 확인해주세요.");
   }
 
   if (isOliveYoungHost(url.hostname)) {
@@ -150,7 +150,7 @@ export async function resolveOliveYoungProductId(rawUrl: string): Promise<string
   }
 
   throw new InvalidOliveYoungUrlError(
-    "올리브영(oliveyoung.co.kr) 상품 URL만 등록할 수 있습니다. (올리브영으로 연결되는 단축 URL도 지원합니다)"
+    "올리브영 상품 링크만 등록할 수 있어요. 올리브영 앱의 공유 링크도 사용할 수 있어요."
   );
 }
 

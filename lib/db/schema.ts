@@ -172,4 +172,26 @@ CREATE TABLE IF NOT EXISTS kakao_digest_logs (
   UNIQUE (user_id, digest_date)
 );
 CREATE INDEX IF NOT EXISTS idx_kakao_digest_logs_date ON kakao_digest_logs (digest_date);
+
+-- Server-side errors for admins to review (lib/domain/errorLogs.ts, shown at
+-- /admin/errors). Shoppers only ever see a generic message; the real error
+-- text, stack and request context land here instead. user_id is a plain
+-- column, not a foreign key, so a log row survives its user being deleted
+-- and a failed insert can never cascade into another failure. resolved_at
+-- NULL means "still open".
+CREATE TABLE IF NOT EXISTS error_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source TEXT NOT NULL,
+  message TEXT NOT NULL,
+  stack TEXT,
+  digest TEXT,
+  path TEXT,
+  user_id TEXT,
+  context TEXT,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  resolved_by TEXT,
+  resolution_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_error_logs_open ON error_logs (resolved_at, id);
 `;
