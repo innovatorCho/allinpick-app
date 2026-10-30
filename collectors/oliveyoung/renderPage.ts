@@ -1,9 +1,4 @@
-import {
-  fetchRenderedHtmlResilient as fetchLocalResilient,
-  isBotChallengePage,
-  type RenderedPage,
-} from "./browserFetcher";
-import { fetchRenderedHtmlServerlessResilient as fetchServerlessResilient } from "./serverlessBrowserFetcher";
+import { isBotChallengePage, type RenderedPage } from "./pageTypes";
 
 export { isBotChallengePage };
 export type { RenderedPage };
@@ -27,7 +22,17 @@ export type { RenderedPage };
  *    @sparticuz/chromium's binary doesn't execute there anyway (confirmed:
  *    `spawn ENOEXEC` on macOS).
  */
+//
+// Both fetchers are loaded lazily (dynamic import) so that merely importing
+// a collector never loads a browser package. Pages like /search import the
+// crawler chain at module level; a browser package that fails to load must
+// only fail the crawl itself (which callers already turn into a
+// NETWORK_ERROR result), never the whole page with a 500.
 export async function fetchRenderedHtmlResilient(url: string, timeoutMs?: number): Promise<RenderedPage> {
-  if (process.env.VERCEL) return fetchServerlessResilient(url, timeoutMs);
+  if (process.env.VERCEL) {
+    const { fetchRenderedHtmlServerlessResilient } = await import("./serverlessBrowserFetcher");
+    return fetchRenderedHtmlServerlessResilient(url, timeoutMs);
+  }
+  const { fetchRenderedHtmlResilient: fetchLocalResilient } = await import("./browserFetcher");
   return fetchLocalResilient(url, timeoutMs);
 }

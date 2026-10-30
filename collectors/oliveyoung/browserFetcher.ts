@@ -1,4 +1,5 @@
 import { chromium, type Browser } from "playwright";
+import { isBotChallengePage, type RenderedPage } from "./pageTypes";
 
 /**
  * Renders a URL with a real (unmodified, no stealth patches) headless
@@ -34,15 +35,8 @@ function getBrowser(): Promise<Browser> {
   return globalThis.__allinpickBrowser;
 }
 
-export interface RenderedPage {
-  html: string;
-  status: number | null;
-}
-
-/** Shared by both collectors — kept here since it's about this fetch mechanism, not OliveYoung's page content per se. */
-export function isBotChallengePage(html: string): boolean {
-  return html.includes("잠시만 기다려 주세요") || (html.includes("cloudflare") && html.toLowerCase().includes("challenge"));
-}
+export { isBotChallengePage };
+export type { RenderedPage };
 
 // Was "networkidle", which stopped working entirely (every real product hit
 // "NETWORK_ERROR: Timeout ...ms exceeded" for over a month straight — last

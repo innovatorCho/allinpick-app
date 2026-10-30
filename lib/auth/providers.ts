@@ -30,7 +30,8 @@ function requireEnv(name: string): string {
 }
 
 export function getBaseUrl(): string {
-  return process.env.APP_BASE_URL ?? "http://localhost:3000";
+  // Strip trailing slashes so "https://x.app/" doesn't yield "https://x.app//api/..."
+  return (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/+$/, "");
 }
 
 export function redirectUriFor(provider: OAuthProvider): string {

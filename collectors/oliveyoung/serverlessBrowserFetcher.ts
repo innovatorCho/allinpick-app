@@ -1,6 +1,6 @@
 import { chromium, type Browser } from "playwright-core";
 import sparticuzChromium from "@sparticuz/chromium";
-import { isBotChallengePage, type RenderedPage } from "./browserFetcher";
+import { isBotChallengePage, type RenderedPage } from "./pageTypes";
 
 export type { RenderedPage };
 export { isBotChallengePage };
