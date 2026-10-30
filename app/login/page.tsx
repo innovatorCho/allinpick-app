@@ -6,7 +6,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
     <div className="mx-auto flex w-full max-w-sm flex-col gap-6 py-12">
       <div className="text-center">
         <h1 className="text-lg font-semibold">로그인</h1>
-        <p className="mt-1 text-sm text-zinc-500">가격을 추적하려면 로그인이 필요합니다.</p>
+        <p className="mt-1 text-sm text-zinc-500">로그인하고 관심 상품의 가격 알림을 받아보세요.</p>
       </div>
 
       {errorMessage && (

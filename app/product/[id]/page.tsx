@@ -30,6 +30,7 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
   const tracking = currentUser ? await getTracking(currentUser.id, id) : null;
   const trackerCount = await countTrackers(id);
 
+  const isAdmin = currentUser?.role === "admin";
   const collectionFailed = product.lastCollectStatus && product.lastCollectStatus !== "SUCCESS";
 
   return (
@@ -54,15 +55,18 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
             )}
           </div>
           <p className="text-xs text-zinc-500">가격 확인: {formatDateTime(product.lastCheckedAt)}</p>
-          <p className="text-xs text-zinc-500">{trackerCount.toLocaleString("ko-KR")}명이 가격 추적 중</p>
+          <p className="text-xs text-zinc-500">{trackerCount.toLocaleString("ko-KR")}명이 가격을 지켜보는 중</p>
         </div>
       </div>
 
       {collectionFailed && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          <p className="font-medium">최근 가격 수집 실패: {collectStatusLabel(product.lastCollectStatus)}</p>
-          <p className="mt-1 text-xs">{product.lastCollectError}</p>
-          <p className="mt-1 text-xs">이전에 확인된 가격 정보를 표시하고 있습니다.</p>
+          <p>최신 가격을 불러오지 못해 마지막으로 확인된 가격을 보여드리고 있어요.</p>
+          {isAdmin && (
+            <p className="mt-1 text-xs">
+              {collectStatusLabel(product.lastCollectStatus)}: {product.lastCollectError}
+            </p>
+          )}
         </div>
       )}
 
@@ -98,7 +102,7 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
             href="/login"
             className="w-full rounded-lg border border-zinc-900 px-4 py-2 text-center text-sm font-medium text-zinc-900 hover:bg-zinc-900 hover:text-white dark:border-zinc-100 dark:text-zinc-100 dark:hover:bg-zinc-100 dark:hover:text-zinc-900"
           >
-            로그인하고 가격 추적하기
+            로그인하고 가격 알림 받기
           </Link>
         )}
         <a
@@ -107,13 +111,8 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
           rel="noopener noreferrer"
           className="w-full rounded-lg bg-emerald-600 px-4 py-2 text-center text-sm font-medium text-white"
         >
-          구매하기
+          올리브영에서 구매하기
         </a>
-        {!product.curatorUrl && (
-          <p className="text-center text-xs text-zinc-400">
-            아직 큐레이터 링크가 등록되지 않아 올리브영 원본 상품 페이지로 이동합니다.
-          </p>
-        )}
       </div>
     </div>
   );

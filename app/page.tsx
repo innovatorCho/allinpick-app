@@ -23,8 +23,8 @@ export default async function HomePage() {
             <BrandMarkSvg />
           </div>
           <div>
-            <p className="text-xs font-medium text-zinc-400">올인픽</p>
-            <h1 className="text-lg font-semibold">올리브영 상품 URL로 가격 추적 시작하기</h1>
+            <h1 className="text-lg font-semibold">올리브영, 제일 쌀 때 사세요</h1>
+            <p className="text-sm text-zinc-500">관심 상품을 등록하면 가격이 내려갈 때 알려드려요</p>
           </div>
         </div>
         <RegisterProductForm />
@@ -47,7 +47,7 @@ export default async function HomePage() {
       <section className="flex flex-col gap-3">
         <h2 className="text-base font-semibold">인기 상품</h2>
         {popular.length === 0 ? (
-          <p className="text-sm text-zinc-500">아직 등록된 상품이 없습니다. 첫 상품을 등록해보세요.</p>
+          <p className="text-sm text-zinc-500">아직 등록된 상품이 없어요. 올리브영 상품 링크를 붙여넣어 첫 상품을 등록해보세요.</p>
         ) : (
           <div className="flex flex-col gap-2">
             {popular.map((p) => (
@@ -72,7 +72,7 @@ export default async function HomePage() {
             하면 추적 중인 상품을 볼 수 있습니다.
           </p>
         ) : tracking.length === 0 ? (
-          <p className="text-sm text-zinc-500">추적 중인 상품이 없습니다.</p>
+          <p className="text-sm text-zinc-500">아직 지켜보는 상품이 없어요. 관심 상품을 등록해보세요.</p>
         ) : (
           <div className="flex flex-col gap-2">
             {tracking.slice(0, 5).map((p) => (

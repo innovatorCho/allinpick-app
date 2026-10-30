@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "올인픽 - 올리브영 가격 추적",
-  description: "올리브영 상품 가격을 추적하는 기능 검증용 MVP 테스트 앱",
+  title: "올인픽 - 올리브영 최저가 알림",
+  description: "올리브영 관심 상품을 등록하면 가격이 내려갈 때 알려드려요.",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
