@@ -7,6 +7,8 @@ import { loginErrorPath } from "@/lib/auth/loginErrors";
 import type { OAuthProvider } from "@/lib/domain/types";
 
 const STATE_COOKIE = "allinpick_oauth_state";
+/** Carries the login page's "로그인 상태 유지" choice across the provider round-trip; read by the callback. */
+const REMEMBER_COOKIE = "allinpick_oauth_remember";
 
 function isSupportedProvider(value: string): value is OAuthProvider {
   return value === "google" || value === "kakao";
@@ -28,6 +30,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     secure: process.env.NODE_ENV === "production",
     maxAge: 600, // 10 minutes — plenty for a login redirect round-trip
   });
+  if (request.nextUrl.searchParams.get("remember") === "1") {
+    store.set(REMEMBER_COOKIE, "1", {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 600,
+    });
+  } else {
+    store.delete(REMEMBER_COOKIE);
+  }
 
   try {
     return NextResponse.redirect(buildAuthorizeUrl(provider, state));

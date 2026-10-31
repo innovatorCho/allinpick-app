@@ -1,9 +1,11 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { randomBytes } from "node:crypto";
 import { getDb } from "@/lib/db/client";
 import { getUser } from "@/lib/domain/users";
 import type { SessionRow } from "@/lib/db/rows";
 import type { AppUser } from "@/lib/domain/types";
+import { isSessionExpired, nextIdleDeadline, sessionPolicyFor } from "@/lib/sessionPolicy";
 
 /**
  * Real, DB-backed sessions (replaces the old cookie-holds-a-fixed-test-user-id
@@ -13,9 +15,26 @@ import type { AppUser } from "@/lib/domain/types";
  */
 
 const SESSION_COOKIE = "allinpick_session";
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+function toTimes(row: SessionRow) {
+  return {
+    expiresAt: row.expires_at,
+    absoluteExpiresAt: row.absolute_expires_at,
+    lastSeenAt: row.last_seen_at,
+    idleTimeoutMs: row.idle_timeout_ms == null ? null : Number(row.idle_timeout_ms),
+  };
+}
 
-export async function getCurrentUser(): Promise<AppUser | null> {
+/**
+ * Resolves the logged-in user and enforces the session policy
+ * (lib/sessionPolicy.ts): an expired session is deleted on sight, and an
+ * active one has its idle deadline pushed forward (at most every few
+ * minutes). Cached per request because the layout and the page both call it.
+ *
+ * An expired session's cookie can't be cleared from here (Server Components
+ * can't set cookies); it's harmless, since its row is gone, and it's
+ * replaced at the next login.
+ */
+export const getCurrentUser = cache(async (): Promise<AppUser | null> => {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -24,13 +43,22 @@ export async function getCurrentUser(): Promise<AppUser | null> {
   const row = (await db.prepare(`SELECT * FROM sessions WHERE id = ?`).get(token)) as SessionRow | undefined;
   if (!row) return null;
 
-  if (new Date(row.expires_at).getTime() <= Date.now()) {
+  const now = new Date();
+  const times = toTimes(row);
+  if (isSessionExpired(times, now)) {
     await db.prepare(`DELETE FROM sessions WHERE id = ?`).run(token);
     return null;
   }
 
+  const deadline = nextIdleDeadline(times, now);
+  if (deadline) {
+    await db
+      .prepare(`UPDATE sessions SET expires_at = ?, last_seen_at = ? WHERE id = ?`)
+      .run(deadline, now.toISOString(), token);
+  }
+
   return getUser(row.user_id);
-}
+});
 
 /** For Server Actions/Route Handlers that require a logged-in user; throws otherwise. */
 export async function requireUser(): Promise<AppUser> {
@@ -49,16 +77,42 @@ export async function requireAdmin(): Promise<AppUser> {
   return user;
 }
 
-/** Creates a session row and sets the cookie. Only callable from a Route Handler or Server Action. */
-export async function createSessionForUser(userId: string): Promise<void> {
+/**
+ * Creates a session row and sets the cookie. Only callable from a Route
+ * Handler or Server Action. `rememberMe` is the login page's "로그인 상태
+ * 유지" checkbox; it's ignored for admins (see lib/sessionPolicy.ts).
+ */
+export async function createSessionForUser(user: Pick<AppUser, "id" | "role">, rememberMe: boolean): Promise<void> {
   const db = await getDb();
   const token = randomBytes(32).toString("hex");
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
+  const policy = sessionPolicyFor(user.role, rememberMe);
+  const absoluteExpiresAt = new Date(now.getTime() + policy.absoluteTimeoutMs);
+  const idleExpiresAt = new Date(Math.min(now.getTime() + policy.idleTimeoutMs, absoluteExpiresAt.getTime()));
+
+  // Housekeeping: this user's dead sessions (expired, or from before the policy existed).
+  await db
+    .prepare(
+      `DELETE FROM sessions WHERE user_id = ?
+         AND (absolute_expires_at IS NULL OR absolute_expires_at <= ? OR expires_at <= ?)`
+    )
+    .run(user.id, now.toISOString(), now.toISOString());
 
   await db
-    .prepare(`INSERT INTO sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)`)
-    .run(token, userId, expiresAt.toISOString(), now.toISOString());
+    .prepare(
+      `INSERT INTO sessions (id, user_id, expires_at, created_at, absolute_expires_at, idle_timeout_ms, last_seen_at, remember_me)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      token,
+      user.id,
+      idleExpiresAt.toISOString(),
+      now.toISOString(),
+      absoluteExpiresAt.toISOString(),
+      policy.idleTimeoutMs,
+      now.toISOString(),
+      policy.persistentCookie ? 1 : 0
+    );
 
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
@@ -66,7 +120,8 @@ export async function createSessionForUser(userId: string): Promise<void> {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
-    expires: expiresAt,
+    // No `expires` → a browser-session cookie, gone when the browser closes.
+    ...(policy.persistentCookie ? { expires: absoluteExpiresAt } : {}),
   });
 }
 

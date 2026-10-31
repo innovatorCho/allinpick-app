@@ -6,6 +6,7 @@ import { getTracking } from "@/lib/domain/tracking";
 import { getCurrentUser } from "@/lib/session";
 import { formatKrw, formatDateTime, formatDate } from "@/lib/format";
 import { collectStatusLabel } from "@/lib/collectStatusLabels";
+import { getSiteSettings } from "@/lib/domain/siteSettings";
 import { PriceChart } from "@/components/PriceChart";
 import { TrackButton } from "@/components/TrackButton";
 import { TargetPriceForm } from "@/components/TargetPriceForm";
@@ -31,6 +32,7 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
   const trackerCount = await countTrackers(id);
 
   const isAdmin = currentUser?.role === "admin";
+  const { priceDisclaimer } = await getSiteSettings();
   const collectionFailed = product.lastCollectStatus && product.lastCollectStatus !== "SUCCESS";
 
   return (
@@ -113,6 +115,9 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
         >
           올리브영에서 구매하기
         </a>
+        {priceDisclaimer && (
+          <p className="whitespace-pre-line break-keep text-center text-xs leading-relaxed text-zinc-400">{priceDisclaimer}</p>
+        )}
       </div>
     </div>
   );

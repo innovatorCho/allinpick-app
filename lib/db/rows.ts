@@ -102,8 +102,13 @@ export interface KakaoDigestLogRow {
 export interface SessionRow {
   id: string;
   user_id: string;
+  /** Idle deadline (slides forward on activity, never past absolute_expires_at). */
   expires_at: string;
   created_at: string;
+  absolute_expires_at: string | null;
+  idle_timeout_ms: number | null;
+  last_seen_at: string | null;
+  remember_me: number;
 }
 
 export interface ErrorLogRow {

@@ -148,6 +148,17 @@ const COLUMN_MIGRATIONS: { table: string; column: string; ddl: string }[] = [
     column: "token_expires_at",
     ddl: "ALTER TABLE oauth_accounts ADD COLUMN token_expires_at TEXT",
   },
+  // Session policy (lib/sessionPolicy.ts). expires_at becomes the sliding
+  // idle deadline; rows without absolute_expires_at predate the policy and
+  // are treated as expired.
+  { table: "sessions", column: "absolute_expires_at", ddl: "ALTER TABLE sessions ADD COLUMN absolute_expires_at TEXT" },
+  { table: "sessions", column: "idle_timeout_ms", ddl: "ALTER TABLE sessions ADD COLUMN idle_timeout_ms INTEGER" },
+  { table: "sessions", column: "last_seen_at", ddl: "ALTER TABLE sessions ADD COLUMN last_seen_at TEXT" },
+  {
+    table: "sessions",
+    column: "remember_me",
+    ddl: "ALTER TABLE sessions ADD COLUMN remember_me INTEGER NOT NULL DEFAULT 0",
+  },
 ];
 
 async function runMigrations(client: Client): Promise<void> {

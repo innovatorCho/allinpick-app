@@ -15,6 +15,7 @@ import {
   reopenErrorLog,
   deleteResolvedErrorLogsOlderThan,
 } from "@/lib/domain/errorLogs";
+import { saveSiteSettings, SITE_SETTING_FIELDS, type SiteSettingKey } from "@/lib/domain/siteSettings";
 import type { NotificationType } from "@/lib/domain/types";
 
 /** Shared across every FormState-returning action below — a DB-connection
@@ -333,4 +334,36 @@ export async function cleanupResolvedErrorLogsAction(): Promise<void> {
   await requireAdmin();
   await deleteResolvedErrorLogsOlderThan(RESOLVED_ERROR_RETENTION_DAYS);
   revalidatePath("/admin/errors");
+}
+
+// ── Site settings (/admin/settings) ─────────────────────────────────────────
+
+export interface SiteSettingsFormState {
+  error?: string;
+  savedAt?: number;
+  /** Echo of what was submitted. React resets a form after its action runs, so the inputs re-read their default values from this and keep what the admin typed. */
+  values?: Partial<Record<SiteSettingKey, string>>;
+}
+
+export async function updateSiteSettingsAction(
+  _prev: SiteSettingsFormState | undefined,
+  formData: FormData
+): Promise<SiteSettingsFormState> {
+  await requireAdmin();
+  const input: Partial<Record<SiteSettingKey, string>> = {};
+  for (const field of SITE_SETTING_FIELDS) {
+    const value = formData.get(field.key);
+    if (typeof value === "string") input[field.key] = value;
+  }
+  try {
+    const result = await saveSiteSettings(input);
+    if (result.error) return { error: result.error, values: input };
+  } catch (err) {
+    const message = dbErrorMessage(err);
+    if (message) return { error: message, values: input };
+    throw err;
+  }
+  // Footer text appears on every page.
+  revalidatePath("/", "layout");
+  return { savedAt: Date.now(), values: input };
 }

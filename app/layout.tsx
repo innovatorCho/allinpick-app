@@ -7,6 +7,7 @@ import { AuthStatus } from "@/components/AuthStatus";
 import { BrandMarkSvg } from "@/components/BrandMark";
 import { countUnread } from "@/lib/domain/notifications";
 import { countOpenErrors } from "@/lib/domain/errorLogs";
+import { getSiteSettings } from "@/lib/domain/siteSettings";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,6 +28,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const currentUser = await getCurrentUser();
   const unreadCount = currentUser ? await countUnread(currentUser.id) : 0;
   const openErrorCount = currentUser?.role === "admin" ? await countOpenErrors() : 0;
+  const site = await getSiteSettings();
 
   return (
     <html
@@ -75,6 +77,22 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           </div>
         </header>
         <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-6">{children}</main>
+        <footer className="border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="mx-auto flex max-w-4xl flex-col gap-2 break-keep px-4 py-6 text-xs leading-relaxed text-zinc-500">
+            {site.priceDisclaimer && <p className="whitespace-pre-line">{site.priceDisclaimer}</p>}
+            {site.footerNotice && <p className="whitespace-pre-line">{site.footerNotice}</p>}
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              <Link href="/privacy" className="font-semibold text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100">
+                개인정보 처리방침
+              </Link>
+              {site.contactEmail && (
+                <a href={`mailto:${site.contactEmail}`} className="hover:text-zinc-900 dark:hover:text-zinc-100">
+                  문의: {site.contactEmail}
+                </a>
+              )}
+            </div>
+          </div>
+        </footer>
       </body>
     </html>
   );

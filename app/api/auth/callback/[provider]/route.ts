@@ -9,6 +9,7 @@ import { loginErrorPath, type LoginErrorCode } from "@/lib/auth/loginErrors";
 import type { OAuthProvider } from "@/lib/domain/types";
 
 const STATE_COOKIE = "allinpick_oauth_state";
+const REMEMBER_COOKIE = "allinpick_oauth_remember"; // set by app/api/auth/[provider]/route.ts
 
 function isSupportedProvider(value: string): value is OAuthProvider {
   return value === "google" || value === "kakao";
@@ -35,7 +36,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
   const store = await cookies();
   const expectedState = store.get(STATE_COOKIE)?.value;
+  const rememberMe = store.get(REMEMBER_COOKIE)?.value === "1";
   store.delete(STATE_COOKIE);
+  store.delete(REMEMBER_COOKIE);
 
   if (!code || !state || !expectedState || state !== expectedState) {
     return loginError(request, "expired");
@@ -67,7 +70,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       await updateOAuthTokens(provider, profile.providerUserId, tokens);
     }
 
-    await createSessionForUser(user.id);
+    await createSessionForUser(user, rememberMe);
   } catch (err) {
     await recordError({ source: "auth:create-session", error: err, path: `GET /api/auth/callback/${provider}`, context: { provider } });
     return loginError(request, "failed");

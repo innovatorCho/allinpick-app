@@ -5,6 +5,7 @@ import { formatDateTime, formatKrw } from "@/lib/format";
 import { collectStatusLabel } from "@/lib/collectStatusLabels";
 import { SeedDataButton } from "@/components/SeedDataButton";
 import { countOpenErrors } from "@/lib/domain/errorLogs";
+import { getSiteSettingsWithSources } from "@/lib/domain/siteSettings";
 
 export default async function AdminPage() {
   const currentUser = await getCurrentUser();
@@ -15,12 +16,13 @@ export default async function AdminPage() {
   const products = await listAllProducts();
   const trackerCounts = await Promise.all(products.map((p) => countTrackers(p.id)));
   const openErrorCount = await countOpenErrors();
+  const { missingRequired } = await getSiteSettingsWithSources();
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-lg font-semibold">상품 관리</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Link
             href="/admin/schedule"
             className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
@@ -43,9 +45,24 @@ export default async function AdminPage() {
           >
             오류 로그{openErrorCount > 0 ? ` ${openErrorCount}` : ""}
           </Link>
+          <Link
+            href="/admin/settings"
+            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
+          >
+            사이트 정보
+          </Link>
           {process.env.NODE_ENV !== "production" && <SeedDataButton />}
         </div>
       </div>
+
+      {missingRequired.length > 0 && (
+        <p className="break-keep rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+          개인정보 처리방침의 필수 정보({missingRequired.map((f) => f.label).join(", ")})가 비어 있어요.{" "}
+          <Link href="/admin/settings" className="font-medium underline">
+            사이트 정보에서 입력하기
+          </Link>
+        </p>
+      )}
 
       <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-800">
         <table className="w-full text-left text-sm">
