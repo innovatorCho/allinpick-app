@@ -59,6 +59,9 @@ async function launchServerlessBrowser(): Promise<Browser> {
     args: sparticuzChromium.args,
     executablePath,
     headless: true,
+    // Playwright's default is 3 minutes; a launch that hangs that long
+    // would eat most of a cron run's time budget.
+    timeout: 30_000,
   });
 }
 
@@ -117,23 +120,40 @@ export async function fetchRenderedHtmlServerlessResilient(url: string, timeoutM
  * One browser shared by every page rendered during a session (one cron run,
  * one search crawl). Launching Chromium costs seconds and a few hundred MB,
  * so doing it once per run instead of once per product is what lets a whole
- * cycle fit in the function's time limit. Concurrent fetches each get their
- * own tab in the same browser.
+ * cycle fit in the function's time limit.
+ *
+ * Pages are rendered ONE AT A TIME. @sparticuz/chromium runs Chromium with
+ * --single-process, and two tabs open at once in that mode crashed the
+ * browser in production (2026-11-04: "browser has been closed" followed by
+ * net::ERR_INSUFFICIENT_RESOURCES). Callers may still call fetch()
+ * concurrently; calls simply queue.
+ *
+ * Every fetch has a hard time limit covering launch, navigation and retry.
+ * When it's hit, the browser is closed (a hung single-process browser can't
+ * be trusted) and the next fetch launches a fresh one. Without this, one
+ * stuck page held the whole cron run until the platform killed it at 300s.
  *
  * The browser launches lazily on the first fetch (a run with nothing due
- * never starts one). If it crashes mid-run, the next fetch launches a fresh
- * one instead of failing every remaining product.
+ * never starts one), and a crashed browser is replaced on the next fetch.
  */
 export interface ServerlessRenderSession {
   fetch(url: string, timeoutMs?: number): Promise<RenderedPage>;
   close(): Promise<void>;
 }
 
+/** Upper bound for one fetch: launch (≤30s, usually a few) + page (20s) + a bot-check retry, trimmed. */
+export const SESSION_FETCH_HARD_TIMEOUT_MS = 55_000;
+
 export function createServerlessRenderSession(
   /** Overridable only for tests (scripts/verify/test-render-session.ts). */
-  launch: () => Promise<Browser> = launchServerlessBrowser
+  launch: () => Promise<Browser> = launchServerlessBrowser,
+  options: { fetchHardTimeoutMs?: number } = {}
 ): ServerlessRenderSession {
+  const hardTimeoutMs = options.fetchHardTimeoutMs ?? SESSION_FETCH_HARD_TIMEOUT_MS;
   let browserPromise: Promise<Browser> | null = null;
+  let queue: Promise<unknown> = Promise.resolve();
+  /** Bumped whenever the browser is force-closed; work from an older generation must not relaunch. */
+  let generation = 0;
 
   async function getBrowser(): Promise<Browser> {
     if (browserPromise) {
@@ -145,6 +165,14 @@ export function createServerlessRenderSession(
     return browserPromise;
   }
 
+  async function discardBrowser(): Promise<void> {
+    generation += 1;
+    const pending = browserPromise;
+    browserPromise = null;
+    const browser = pending ? await pending.catch(() => null) : null;
+    await browser?.close().catch(() => {});
+  }
+
   async function renderResilient(url: string, timeoutMs: number): Promise<RenderedPage> {
     const browser = await getBrowser();
     const first = await renderWithBrowser(browser, url, timeoutMs);
@@ -153,23 +181,53 @@ export function createServerlessRenderSession(
     return renderWithBrowser(browser, url, timeoutMs);
   }
 
+  async function renderOnce(url: string, timeoutMs: number): Promise<RenderedPage> {
+    const startedIn = generation;
+    try {
+      return await renderResilient(url, timeoutMs);
+    } catch (err) {
+      // Browser died under us (crash, failed launch): one retry on a fresh
+      // browser. Any other failure (page timeout, HTTP error) is the page's
+      // problem and is reported as-is.
+      // Abandoned by the hard limit while running: don't launch a second
+      // browser alongside the one the next queued fetch is using.
+      if (startedIn !== generation) throw err;
+      const browser = browserPromise ? await browserPromise.catch(() => null) : null;
+      if (browser && browser.isConnected()) throw err;
+      browserPromise = null;
+      return renderResilient(url, timeoutMs);
+    }
+  }
+
+  async function renderWithHardLimit(url: string, timeoutMs: number): Promise<RenderedPage> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const work = renderOnce(url, timeoutMs);
+    work.catch(() => {}); // if the limit wins, this rejection must not go unhandled
+    const limit = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`페이지 처리가 ${Math.round(hardTimeoutMs / 1000)}초 안에 끝나지 않아 중단했습니다.`)),
+        hardTimeoutMs
+      );
+    });
+    try {
+      return await Promise.race([work, limit]);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("안에 끝나지 않아")) await discardBrowser();
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   return {
-    async fetch(url, timeoutMs = 20_000) {
-      try {
-        return await renderResilient(url, timeoutMs);
-      } catch (err) {
-        // Browser died under us (crash, OOM): one retry on a fresh browser.
-        // Any other failure (timeout, page error) is the page's problem.
-        const browser = browserPromise ? await browserPromise.catch(() => null) : null;
-        if (browser && browser.isConnected()) throw err;
-        browserPromise = null;
-        return renderResilient(url, timeoutMs);
-      }
+    fetch(url, timeoutMs = 20_000) {
+      const result = queue.then(() => renderWithHardLimit(url, timeoutMs));
+      queue = result.catch(() => {});
+      return result;
     },
     async close() {
-      const browser = browserPromise ? await browserPromise.catch(() => null) : null;
-      browserPromise = null;
-      await browser?.close().catch(() => {});
+      await queue;
+      await discardBrowser();
     },
   };
 }

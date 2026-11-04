@@ -238,11 +238,12 @@ const STALE_CYCLE_MS = 10 * 60_000;
 
 /**
  * How long before the platform's hard limit a cycle stops *starting* new
- * products. One product can take ~50s in the worst case (20s page timeout,
- * a bot-check retry, plus waits), so stopping early lets in-flight work
- * finish and be saved instead of the whole run being killed mid-way.
+ * products, so in-flight work finishes and is saved instead of the whole
+ * run being killed mid-way. On Vercel each page is capped at 55s
+ * (SESSION_FETCH_HARD_TIMEOUT_MS) and pages render one at a time, so with
+ * up to 2 workers queued at the cutoff the tail is at most ~110s.
  */
-export const CYCLE_START_CUTOFF_MARGIN_MS = 80_000;
+export const CYCLE_START_CUTOFF_MARGIN_MS = 120_000;
 
 export interface RunCycleOptions {
   /** Epoch ms after which no new product is started; the rest stay due for the next run. */
