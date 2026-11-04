@@ -131,6 +131,20 @@ async function main() {
     assert.equal((await getSchedulerStatus()).cycleInProgress, false);
   });
 
+  await test("failed products keep their error text in the run results", async () => {
+    await makeDue(["TB0001"]);
+    const failing: Collector = async (sourceUrl) => ({
+      status: "NETWORK_ERROR",
+      sourceUrl,
+      error: "page.goto: net::ERR_INSUFFICIENT_RESOURCES at https://example",
+      checkedAt: new Date().toISOString(),
+    });
+    await runOneCycle(failing);
+    const r = (await getSchedulerStatus()).lastRunResults.find((x) => x.productId === "TB0001")!;
+    assert.equal(r.status, "NETWORK_ERROR");
+    assert.match(r.error ?? "", /ERR_INSUFFICIENT_RESOURCES/);
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exitCode = 1;
 }

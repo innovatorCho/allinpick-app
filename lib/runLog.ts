@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes } from "node:crypto";
+import { statfsSync } from "node:fs";
+import { freemem, totalmem } from "node:os";
 
 /**
  * Progress logging for long background runs (price collection, search
@@ -59,4 +61,33 @@ export function runWarn(message: string, fallbackTag = "log"): void {
 
 export function seconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)}초`;
+}
+
+/**
+ * Server resources at this moment, for spotting memory or /tmp pressure
+ * (serverless Chromium unpacks itself into /tmp and runs in this process's
+ * memory budget). Never throws: anything unavailable is just left out.
+ */
+export function resourceSnapshot(): string {
+  const parts: string[] = [];
+  try {
+    const mb = (n: number) => `${Math.round(n / 1024 / 1024)}MB`;
+    parts.push(`프로세스 메모리 ${mb(process.memoryUsage().rss)}`);
+    parts.push(`서버 여유 메모리 ${mb(freemem())}/${mb(totalmem())}`);
+    const st = statfsSync("/tmp");
+    parts.push(`/tmp 여유 ${mb(st.bavail * st.bsize)}`);
+  } catch {
+    // best effort
+  }
+  return parts.join(" · ");
+}
+
+/** Multi-line error text, indented under its log line and capped so one error can't flood the log. */
+export function errorDetail(text: string, max = 1500): string {
+  const trimmed = text.length > max ? `${text.slice(0, max)}…(생략)` : text;
+  return trimmed
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .map((l) => `    | ${l}`)
+    .join("\n");
 }

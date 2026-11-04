@@ -1,7 +1,7 @@
 import { chromium, type Browser } from "playwright-core";
 import sparticuzChromium from "@sparticuz/chromium";
 import { isBotChallengePage, type RenderedPage } from "./pageTypes";
-import { runLog, runWarn, seconds } from "@/lib/runLog";
+import { errorDetail, resourceSnapshot, runLog, runWarn, seconds } from "@/lib/runLog";
 
 export type { RenderedPage };
 export { isBotChallengePage };
@@ -69,23 +69,73 @@ async function launchServerlessBrowser(): Promise<Browser> {
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "?";
+  }
+}
+
 async function renderWithBrowser(browser: Browser, url: string, timeoutMs: number): Promise<RenderedPage> {
   const page = await browser.newPage({ userAgent: USER_AGENT });
+
+  // Per-page diagnostics, logged once below: how much the page pulled in
+  // and which sub-requests failed. This is where errors like
+  // ERR_INSUFFICIENT_RESOURCES can be traced to a cause.
+  const started = Date.now();
+  let requestCount = 0;
+  const failuresByReason = new Map<string, number>();
+  const failureSamples: string[] = [];
+  if (typeof page.on === "function") {
+    page.on("request", () => {
+      requestCount += 1;
+    });
+    page.on("requestfailed", (req) => {
+      const reason = req.failure()?.errorText ?? "unknown";
+      failuresByReason.set(reason, (failuresByReason.get(reason) ?? 0) + 1);
+      if (failureSamples.length < 3) failureSamples.push(`${reason} ${req.resourceType()} ${hostOf(req.url())}`);
+    });
+    page.on("crash", () => runWarn(`페이지 프로세스가 죽었습니다: ${url}`, "browser"));
+  }
+  const requestSummary = () => {
+    const failed = [...failuresByReason.values()].reduce((a, b) => a + b, 0);
+    if (failed === 0) return `요청 ${requestCount}개`;
+    const reasons = [...failuresByReason.entries()].map(([r, n]) => `${r} ${n}`).join(", ");
+    return `요청 ${requestCount}개 (실패 ${failed}: ${reasons}; 예: ${failureSamples.join(" / ")})`;
+  };
+
+  let gotoMs: number | null = null;
   try {
     // "networkidle" stopped working entirely — matches browserFetcher.ts's
     // finding: OliveYoung's page keeps some background connection open
     // permanently, so the network never goes fully idle and this never
     // resolves regardless of timeout. Switched to "domcontentloaded".
     const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: timeoutMs });
+    gotoMs = Date.now() - started;
     // Longer than browserFetcher.ts's 1s — confirmed empirically (Docker/Amazon
     // Linux test) that OliveYoung's eg:* meta tags land ~2s AFTER domcontentloaded
     // in this environment, later than they do with a plain local Playwright
     // Chromium. 1s wasn't enough and produced false PARSER_ERROR results.
     await page.waitForTimeout(3000);
     const html = await page.content();
-    return { html, status: response?.status() ?? null };
+    const status = response?.status() ?? null;
+    const title = html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim().slice(0, 60) ?? "(없음)";
+    runLog(
+      `페이지 로드 · HTTP ${status ?? "?"} · 문서 ${seconds(gotoMs)} + 대기 3초 · ${requestSummary()} · HTML ${Math.round(html.length / 1024)}KB · 제목 "${title}"`,
+      "browser"
+    );
+    return { html, status };
+  } catch (err) {
+    const stage = gotoMs == null ? "문서 요청 중" : "문서 응답 후";
+    runWarn(
+      `페이지 로드 실패 (${stage}, ${seconds(Date.now() - started)}) · ${requestSummary()} · ${resourceSnapshot()}\n` +
+        errorDetail(err instanceof Error ? err.message : String(err), 600),
+      "browser"
+    );
+    throw err;
   } finally {
-    await page.close();
+    await page.close().catch(() => {});
   }
 }
 
@@ -167,7 +217,7 @@ export function createServerlessRenderSession(
     runLog("브라우저 실행 시작", "browser");
     browserPromise = launch().then(
       (browser) => {
-        runLog(`브라우저 실행 완료 (${seconds(Date.now() - started)})`, "browser");
+        runLog(`브라우저 실행 완료 (${seconds(Date.now() - started)}) · ${resourceSnapshot()}`, "browser");
         return browser;
       },
       (err: unknown) => {

@@ -2,7 +2,8 @@ import { listDueTrackedProducts, getProductById, updateSchedulingMeta } from "@/
 import { recordError } from "@/lib/domain/errorLogs";
 import { recollectProduct, type Collector } from "@/lib/domain/collection";
 import { withRenderSession } from "@/collectors/oliveyoung/renderPage";
-import { newRunId, runLog, runWarn, seconds, withRunLog } from "@/lib/runLog";
+import { errorDetail, newRunId, resourceSnapshot, runLog, runWarn, seconds, withRunLog } from "@/lib/runLog";
+import { collectFailureCategory } from "@/lib/collectFailureCategory";
 import {
   loadSchedulerSettings,
   persistConcurrency,
@@ -197,12 +198,18 @@ async function collectOne(product: Product, position: string, collector?: Collec
   const started = Date.now();
   runLog(`${position} 시작 ${product.id} "${product.name}"`);
   const result = await collectOneInner(product, collector);
-  const change = result.changeType ? ` · 가격 ${CHANGE_LABEL[result.changeType] ?? result.changeType}` : "";
-  const err = result.error ? ` · ${result.error.split("\n")[0].slice(0, 200)}` : "";
+  const elapsed = seconds(Date.now() - started);
   const next = result.nextCheckAt ? ` · 다음 확인 ${result.nextCheckAt}` : "";
-  const line = `${position} 완료 ${product.id} → ${result.status} (${seconds(Date.now() - started)})${change}${err}${next}`;
-  if (result.status === "SUCCESS") runLog(line);
-  else runWarn(line);
+  if (result.status === "SUCCESS") {
+    const change = result.changeType ? ` · 가격 ${CHANGE_LABEL[result.changeType] ?? result.changeType}` : "";
+    runLog(`${position} 성공 ${product.id} (${elapsed})${change}${next} · ${resourceSnapshot()}`);
+  } else {
+    const cause = collectFailureCategory(result.status, result.error);
+    runWarn(
+      `${position} 실패 ${product.id} (${elapsed}) · ${result.status} · 원인: ${cause}${next} · ${resourceSnapshot()}` +
+        (result.error ? `\n${errorDetail(result.error)}` : "")
+    );
+  }
   return result;
 }
 
@@ -217,6 +224,9 @@ async function collectOneInner(product: Product, collector?: Collector): Promise
       name: product.name,
       status: outcome.collectResult.status,
       changeType: outcome.changeType,
+      // Was missing: failed collections reached the logs and the admin
+      // schedule page with no error text at all, only "NETWORK_ERROR".
+      error: outcome.collectResult.status === "SUCCESS" ? undefined : outcome.collectResult.error,
       nextCheckAt: updated?.nextCheckAt ?? null,
     };
   } catch (err) {
@@ -306,6 +316,8 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
     const concurrency = process.env.VERCEL ? 1 : state.concurrency;
     const concurrencyNote = concurrency === state.concurrency ? `${concurrency}개` : `${concurrency}개 (Vercel 브라우저 제약, 설정값 ${state.concurrency})`;
     runLog(`===== 수집 시작 · 대상 ${targets.length}개 · 동시 처리 ${concurrencyNote}${cutoffNote} =====`);
+    runLog(`환경: ${process.env.VERCEL ? `Vercel(${process.env.VERCEL_REGION ?? "region 미상"})` : "로컬"} · ${resourceSnapshot()}`);
+    if (targets.length > 0) runLog(`대상 목록: ${targets.map((t) => t.id).join(", ")}`);
     if (targets.length === MAX_PRODUCTS_PER_TICK) {
       runLog(`처리 상한(${MAX_PRODUCTS_PER_TICK}개)에 도달했습니다. 남은 상품은 다음 실행에서 오래 기다린 순서대로 처리합니다.`);
     }
@@ -366,9 +378,19 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
     state.lastRunResults = processed;
     const ok = processed.filter((r) => r.status === "SUCCESS").length;
     const drops = processed.filter((r) => r.changeType === "decrease").length;
-    runLog(
-      `===== 수집 종료 · ${seconds(Date.now() - startedAt.getTime())} · 성공 ${ok} · 실패 ${processed.length - ok} · 미처리 ${total - processed.length} · 가격 하락 ${drops} =====`
-    );
+    const causes = new Map<string, number>();
+    for (const r of processed) {
+      if (r.status === "SUCCESS") continue;
+      const cause = collectFailureCategory(r.status, r.error);
+      causes.set(cause, (causes.get(cause) ?? 0) + 1);
+    }
+    const causeNote =
+      causes.size > 0
+        ? ` · 실패 원인: ${[...causes.entries()].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(", ")}`
+        : "";
+    const summary = `===== 수집 종료 · ${seconds(Date.now() - startedAt.getTime())} · 대상 ${total} · 성공 ${ok} · 실패 ${processed.length - ok} · 미처리 ${total - processed.length} · 가격 하락 ${drops}${causeNote} =====`;
+    if (ok === processed.length) runLog(summary);
+    else runWarn(summary);
   } catch (err) {
     // listDueTrackedProducts itself failing (DB unreachable before we even
     // got a product list) — the whole tick is a no-op, but the process and
