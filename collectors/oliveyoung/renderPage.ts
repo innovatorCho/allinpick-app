@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isBotChallengePage, type RenderedPage } from "./pageTypes";
 import type { ServerlessRenderSession } from "./serverlessBrowserFetcher";
+import { runLog } from "@/lib/runLog";
 
 export { isBotChallengePage };
 export type { RenderedPage };
@@ -32,7 +33,10 @@ export type { RenderedPage };
 // NETWORK_ERROR result), never the whole page with a 500.
 export async function fetchRenderedHtmlResilient(url: string, timeoutMs?: number): Promise<RenderedPage> {
   const session = renderSessionStore.getStore();
-  if (session) return session.fetch(url, timeoutMs);
+  if (session) {
+    runLog(`페이지 요청 (대기 순서대로 하나씩 처리): ${url}`, "browser");
+    return session.fetch(url, timeoutMs);
+  }
   if (process.env.VERCEL) {
     const { fetchRenderedHtmlServerlessResilient } = await import("./serverlessBrowserFetcher");
     return fetchRenderedHtmlServerlessResilient(url, timeoutMs);

@@ -1,6 +1,7 @@
 import { chromium, type Browser } from "playwright-core";
 import sparticuzChromium from "@sparticuz/chromium";
 import { isBotChallengePage, type RenderedPage } from "./pageTypes";
+import { runLog, runWarn, seconds } from "@/lib/runLog";
 
 export type { RenderedPage };
 export { isBotChallengePage };
@@ -159,9 +160,21 @@ export function createServerlessRenderSession(
     if (browserPromise) {
       const browser = await browserPromise.catch(() => null);
       if (browser?.isConnected()) return browser;
+      if (browser) runWarn("브라우저가 종료된 상태라 새로 실행합니다.", "browser");
       browserPromise = null;
     }
-    browserPromise = launch();
+    const started = Date.now();
+    runLog("브라우저 실행 시작", "browser");
+    browserPromise = launch().then(
+      (browser) => {
+        runLog(`브라우저 실행 완료 (${seconds(Date.now() - started)})`, "browser");
+        return browser;
+      },
+      (err: unknown) => {
+        runWarn(`브라우저 실행 실패 (${seconds(Date.now() - started)}): ${err instanceof Error ? err.message.split("\n")[0] : err}`, "browser");
+        throw err;
+      }
+    );
     return browserPromise;
   }
 
@@ -194,6 +207,10 @@ export function createServerlessRenderSession(
       if (startedIn !== generation) throw err;
       const browser = browserPromise ? await browserPromise.catch(() => null) : null;
       if (browser && browser.isConnected()) throw err;
+      runWarn(
+        `브라우저가 처리 중 종료되어 새 브라우저로 한 번 재시도합니다: ${err instanceof Error ? err.message.split("\n")[0] : err}`,
+        "browser"
+      );
       browserPromise = null;
       return renderResilient(url, timeoutMs);
     }
@@ -212,7 +229,10 @@ export function createServerlessRenderSession(
     try {
       return await Promise.race([work, limit]);
     } catch (err) {
-      if (err instanceof Error && err.message.includes("안에 끝나지 않아")) await discardBrowser();
+      if (err instanceof Error && err.message.includes("안에 끝나지 않아")) {
+        runWarn(`${seconds(hardTimeoutMs)} 초과로 브라우저를 강제 종료합니다: ${url}`, "browser");
+        await discardBrowser();
+      }
       throw err;
     } finally {
       clearTimeout(timer);
@@ -227,7 +247,9 @@ export function createServerlessRenderSession(
     },
     async close() {
       await queue;
+      const hadBrowser = browserPromise != null;
       await discardBrowser();
+      if (hadBrowser) runLog("브라우저 닫음", "browser");
     },
   };
 }

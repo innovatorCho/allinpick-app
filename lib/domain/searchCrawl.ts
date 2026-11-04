@@ -1,6 +1,7 @@
 import { searchOliveYoungGoodsNos, goodsNoToSourceUrl } from "@/collectors/oliveyoung/searchCollector";
 import type { SearchCrawlResult, SearchCrawlStatus } from "@/collectors/oliveyoung/searchCollector";
 import { withRenderSession } from "@/collectors/oliveyoung/renderPage";
+import { newRunId, runLog, seconds, withRunLog } from "@/lib/runLog";
 import { ensureProductCollected, type Collector } from "./collection";
 import type { CollectStatus, Product } from "./types";
 
@@ -53,7 +54,13 @@ export async function crawlOliveYoungByKeyword(
   collector?: Collector
 ): Promise<KeywordCrawlOutcome> {
   // One browser for the search page and all product pages it leads to.
-  return withRenderSession(() => crawlWithinSession(keyword, limit, searchFn, collector));
+  return withRunLog("search-crawl", newRunId(), async () => {
+    const started = Date.now();
+    runLog(`===== 올리브영 검색 시작 · "${keyword}" =====`);
+    const outcome = await withRenderSession(() => crawlWithinSession(keyword, limit, searchFn, collector));
+    runLog(`===== 올리브영 검색 종료 · ${seconds(Date.now() - started)} · ${outcome.status} · 상품 ${outcome.products.length}개 =====`);
+    return outcome;
+  });
 }
 
 async function crawlWithinSession(

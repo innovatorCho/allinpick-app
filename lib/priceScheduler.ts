@@ -2,6 +2,7 @@ import { listDueTrackedProducts, getProductById, updateSchedulingMeta } from "@/
 import { recordError } from "@/lib/domain/errorLogs";
 import { recollectProduct, type Collector } from "@/lib/domain/collection";
 import { withRenderSession } from "@/collectors/oliveyoung/renderPage";
+import { newRunId, runLog, runWarn, seconds, withRunLog } from "@/lib/runLog";
 import {
   loadSchedulerSettings,
   persistConcurrency,
@@ -192,7 +193,22 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-async function collectOne(product: Product, collector?: Collector): Promise<SchedulerRunResult> {
+async function collectOne(product: Product, position: string, collector?: Collector): Promise<SchedulerRunResult> {
+  const started = Date.now();
+  runLog(`${position} 시작 ${product.id} "${product.name}"`);
+  const result = await collectOneInner(product, collector);
+  const change = result.changeType ? ` · 가격 ${CHANGE_LABEL[result.changeType] ?? result.changeType}` : "";
+  const err = result.error ? ` · ${result.error.split("\n")[0].slice(0, 200)}` : "";
+  const next = result.nextCheckAt ? ` · 다음 확인 ${result.nextCheckAt}` : "";
+  const line = `${position} 완료 ${product.id} → ${result.status} (${seconds(Date.now() - started)})${change}${err}${next}`;
+  if (result.status === "SUCCESS") runLog(line);
+  else runWarn(line);
+  return result;
+}
+
+const CHANGE_LABEL: Record<string, string> = { initial: "최초", increase: "상승", decrease: "하락", same: "변동 없음" };
+
+async function collectOneInner(product: Product, collector?: Collector): Promise<SchedulerRunResult> {
   try {
     const outcome = await recollectProduct(product.id, collector);
     const updated = await getProductById(product.id);
@@ -251,10 +267,15 @@ export interface RunCycleOptions {
 }
 
 export async function runOneCycle(collector?: Collector, options: RunCycleOptions = {}): Promise<void> {
+  const runId = newRunId();
+  return withRunLog("collect", runId, () => runOneCycleLogged(collector, options));
+}
+
+async function runOneCycleLogged(collector: Collector | undefined, options: RunCycleOptions): Promise<void> {
   const state = await ensureSettingsLoaded();
 
   if (!state.enabled) {
-    console.log("[price-scheduler] 일시정지 상태라 이번 호출은 건너뜁니다.");
+    runLog("건너뜀: 스케줄러가 일시정지 상태입니다.");
     return;
   }
   const stale =
@@ -262,9 +283,9 @@ export async function runOneCycle(collector?: Collector, options: RunCycleOption
     state.lastRunStartedAt != null &&
     Date.now() - new Date(state.lastRunStartedAt).getTime() > STALE_CYCLE_MS;
   if (stale) {
-    console.warn("[price-scheduler] 이전 주기가 비정상 종료된 것으로 보여 진행 중 표시를 해제합니다.");
+    runWarn(`이전 실행(${state.lastRunStartedAt} 시작)이 비정상 종료된 것으로 보여 진행 중 표시를 해제합니다.`);
   } else if (state.cycleInProgress) {
-    console.log("[price-scheduler] 이전 재수집 주기가 아직 진행 중이라 이번 주기는 건너뜁니다.");
+    runLog(`건너뜀: 같은 서버에서 다른 실행이 진행 중입니다 (${state.lastRunStartedAt} 시작).`);
     return;
   }
 
@@ -274,20 +295,27 @@ export async function runOneCycle(collector?: Collector, options: RunCycleOption
 
   try {
     const targets = await listDueTrackedProducts(startedAt.toISOString(), MAX_PRODUCTS_PER_TICK);
-    console.log(
-      `[price-scheduler] 이번 틱에 확인이 필요한 상품 ${targets.length}개 재수집 시작 (동시 처리 ${state.concurrency}개)`
-    );
+    const cutoffNote =
+      options.stopStartingAt != null
+        ? ` · 새 상품 시작 마감 ${seconds(options.stopStartingAt - startedAt.getTime())} 후`
+        : "";
+    // On Vercel, serverless Chromium renders one page at a time anyway (see
+    // createServerlessRenderSession), so a second worker would only sit in
+    // the browser's queue while its log line already says "started", and the
+    // start cutoff would be checked too early for it.
+    const concurrency = process.env.VERCEL ? 1 : state.concurrency;
+    const concurrencyNote = concurrency === state.concurrency ? `${concurrency}개` : `${concurrency}개 (Vercel 브라우저 제약, 설정값 ${state.concurrency})`;
+    runLog(`===== 수집 시작 · 대상 ${targets.length}개 · 동시 처리 ${concurrencyNote}${cutoffNote} =====`);
     if (targets.length === MAX_PRODUCTS_PER_TICK) {
-      console.log(
-        `[price-scheduler] 처리 상한(${MAX_PRODUCTS_PER_TICK}개)에 도달했습니다 — 밀린 상품이 있다면 다음 틱들에 걸쳐 오래 기다린 순서대로 이어서 처리됩니다.`
-      );
+      runLog(`처리 상한(${MAX_PRODUCTS_PER_TICK}개)에 도달했습니다. 남은 상품은 다음 실행에서 오래 기다린 순서대로 처리합니다.`);
     }
+    const total = targets.length;
 
     let botBlockedCount = 0;
     let circuitBroken = false;
     let outOfTime = false;
     const results = await withRenderSession(() =>
-      mapWithConcurrency(targets, state.concurrency, (p) => collectOne(p, collector), {
+      mapWithConcurrency(targets, concurrency, (p) => collectOne(p, `(${targets.indexOf(p) + 1}/${total})`, collector), {
       onResult: (r) => {
         if (r.status === "BOT_BLOCKED") {
           botBlockedCount += 1;
@@ -306,20 +334,14 @@ export async function runOneCycle(collector?: Collector, options: RunCycleOption
     );
 
     const processed = results.filter((r): r is SchedulerRunResult => r !== undefined);
-    for (const r of processed) {
-      const changeNote = r.changeType ? ` (${r.changeType})` : "";
-      const errNote = r.error ? ` — ${r.error}` : "";
-      const nextNote = r.nextCheckAt ? `, 다음 확인: ${r.nextCheckAt}` : "";
-      console.log(`[price-scheduler] ${r.productId} "${r.name}" → ${r.status}${changeNote}${errNote}${nextNote}`);
-    }
 
     if (outOfTime && !circuitBroken) {
       // Left untouched on purpose: still due, oldest first, so the next run
       // picks them up before anything else.
-      const remaining = results.filter((r) => r === undefined).length;
-      console.warn(
-        `[price-scheduler] 실행 시간 한도에 가까워 새 상품 시작을 멈췄습니다. 남은 ${remaining}개 상품은 다음 실행에서 처리합니다.`
-      );
+      // Not results.filter(...): the results array has holes for never-started
+      // items, and filter skips holes, which made this always report 0.
+      const remaining = total - processed.length;
+      runWarn(`시간 한도에 가까워 새 상품 시작을 멈췄습니다. 남은 ${remaining}개는 다음 실행에서 처리합니다.`);
     }
 
     if (circuitBroken) {
@@ -336,19 +358,26 @@ export async function runOneCycle(collector?: Collector, options: RunCycleOption
           consecutiveSameCount: product.consecutiveSameCount,
         });
       }
-      console.warn(
-        `[price-scheduler] Cloudflare 차단 ${botBlockedCount}건 감지 — 이번 주기를 조기 중단합니다. 나머지 ${skipped.length}개 상품은 ${Math.round(BOT_BLOCK_COOLDOWN_MS / 60000)}분 뒤로 미룸.`
+      runWarn(
+        `Cloudflare 차단 ${botBlockedCount}건 감지로 조기 중단합니다. 나머지 ${skipped.length}개는 ${Math.round(BOT_BLOCK_COOLDOWN_MS / 60000)}분 뒤로 미룹니다.`
       );
     }
 
     state.lastRunResults = processed;
-    console.log("[price-scheduler] 이번 주기 완료");
+    const ok = processed.filter((r) => r.status === "SUCCESS").length;
+    const drops = processed.filter((r) => r.changeType === "decrease").length;
+    runLog(
+      `===== 수집 종료 · ${seconds(Date.now() - startedAt.getTime())} · 성공 ${ok} · 실패 ${processed.length - ok} · 미처리 ${total - processed.length} · 가격 하락 ${drops} =====`
+    );
   } catch (err) {
     // listDueTrackedProducts itself failing (DB unreachable before we even
     // got a product list) — the whole tick is a no-op, but the process and
     // the timer must survive; the next tick tries again on its own.
     // recordError also prints to the console; when the DB itself is down it
     // can't save the row, and the console line is all that remains.
+    runWarn(
+      `===== 수집 비정상 종료 · ${seconds(Date.now() - startedAt.getTime())} · ${err instanceof Error ? err.message.split("\n")[0] : String(err)} =====`
+    );
     await recordError({
       source: err instanceof DbConnectionError || err instanceof DbConfigError ? "scheduler:db" : "scheduler:cycle",
       error: err,
