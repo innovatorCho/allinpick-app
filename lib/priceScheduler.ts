@@ -1,6 +1,7 @@
 import { listDueTrackedProducts, getProductById, updateSchedulingMeta } from "@/lib/domain/products";
 import { recordError } from "@/lib/domain/errorLogs";
 import { recollectProduct, type Collector } from "@/lib/domain/collection";
+import { withRenderSession } from "@/collectors/oliveyoung/renderPage";
 import {
   loadSchedulerSettings,
   persistConcurrency,
@@ -227,14 +228,41 @@ async function collectOne(product: Product, collector?: Collector): Promise<Sche
  * (scripts/verify/test-circuit-breaker.ts) — real callers never pass it, so
  * `collectOne` falls through to the real collectOliveYoungProduct.
  */
-export async function runOneCycle(collector?: Collector): Promise<void> {
+/**
+ * A cycle that's been "in progress" this long is assumed dead: its function
+ * was killed (timeout, crash) before the `finally` below could clear the
+ * flag. Without this, a reused serverless instance would skip every later
+ * cycle forever. Comfortably longer than any real cycle (max ~5 minutes).
+ */
+const STALE_CYCLE_MS = 10 * 60_000;
+
+/**
+ * How long before the platform's hard limit a cycle stops *starting* new
+ * products. One product can take ~50s in the worst case (20s page timeout,
+ * a bot-check retry, plus waits), so stopping early lets in-flight work
+ * finish and be saved instead of the whole run being killed mid-way.
+ */
+export const CYCLE_START_CUTOFF_MARGIN_MS = 80_000;
+
+export interface RunCycleOptions {
+  /** Epoch ms after which no new product is started; the rest stay due for the next run. */
+  stopStartingAt?: number;
+}
+
+export async function runOneCycle(collector?: Collector, options: RunCycleOptions = {}): Promise<void> {
   const state = await ensureSettingsLoaded();
 
   if (!state.enabled) {
     console.log("[price-scheduler] 일시정지 상태라 이번 호출은 건너뜁니다.");
     return;
   }
-  if (state.cycleInProgress) {
+  const stale =
+    state.cycleInProgress &&
+    state.lastRunStartedAt != null &&
+    Date.now() - new Date(state.lastRunStartedAt).getTime() > STALE_CYCLE_MS;
+  if (stale) {
+    console.warn("[price-scheduler] 이전 주기가 비정상 종료된 것으로 보여 진행 중 표시를 해제합니다.");
+  } else if (state.cycleInProgress) {
     console.log("[price-scheduler] 이전 재수집 주기가 아직 진행 중이라 이번 주기는 건너뜁니다.");
     return;
   }
@@ -256,15 +284,25 @@ export async function runOneCycle(collector?: Collector): Promise<void> {
 
     let botBlockedCount = 0;
     let circuitBroken = false;
-    const results = await mapWithConcurrency(targets, state.concurrency, (p) => collectOne(p, collector), {
+    let outOfTime = false;
+    const results = await withRenderSession(() =>
+      mapWithConcurrency(targets, state.concurrency, (p) => collectOne(p, collector), {
       onResult: (r) => {
         if (r.status === "BOT_BLOCKED") {
           botBlockedCount += 1;
           if (botBlockedCount >= BOT_BLOCK_CIRCUIT_BREAKER_THRESHOLD) circuitBroken = true;
         }
       },
-      shouldAbort: () => circuitBroken,
-    });
+      shouldAbort: () => {
+        if (circuitBroken) return true;
+        if (options.stopStartingAt != null && Date.now() >= options.stopStartingAt) {
+          outOfTime = true;
+          return true;
+        }
+        return false;
+      },
+      })
+    );
 
     const processed = results.filter((r): r is SchedulerRunResult => r !== undefined);
     for (const r of processed) {
@@ -272,6 +310,15 @@ export async function runOneCycle(collector?: Collector): Promise<void> {
       const errNote = r.error ? ` — ${r.error}` : "";
       const nextNote = r.nextCheckAt ? `, 다음 확인: ${r.nextCheckAt}` : "";
       console.log(`[price-scheduler] ${r.productId} "${r.name}" → ${r.status}${changeNote}${errNote}${nextNote}`);
+    }
+
+    if (outOfTime && !circuitBroken) {
+      // Left untouched on purpose: still due, oldest first, so the next run
+      // picks them up before anything else.
+      const remaining = results.filter((r) => r === undefined).length;
+      console.warn(
+        `[price-scheduler] 실행 시간 한도에 가까워 새 상품 시작을 멈췄습니다. 남은 ${remaining}개 상품은 다음 실행에서 처리합니다.`
+      );
     }
 
     if (circuitBroken) {
@@ -376,5 +423,10 @@ export async function updateSchedulerConfig(input: SchedulerConfigInput): Promis
  * cut off the moment the Server Action's response goes out.
  */
 export function runSchedulerNow(): void {
-  runAfterResponse(() => runOneCycle().catch((err) => recordError({ source: "scheduler:manual-run", error: err })));
+  // after() runs under the page's own time limit (300s default with Fluid
+  // compute), so the same cutoff as the cron route applies.
+  const stopStartingAt = Date.now() + 300_000 - CYCLE_START_CUTOFF_MARGIN_MS;
+  runAfterResponse(() =>
+    runOneCycle(undefined, { stopStartingAt }).catch((err) => recordError({ source: "scheduler:manual-run", error: err }))
+  );
 }

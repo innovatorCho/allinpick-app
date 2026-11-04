@@ -1,4 +1,6 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { isBotChallengePage, type RenderedPage } from "./pageTypes";
+import type { ServerlessRenderSession } from "./serverlessBrowserFetcher";
 
 export { isBotChallengePage };
 export type { RenderedPage };
@@ -29,10 +31,35 @@ export type { RenderedPage };
 // only fail the crawl itself (which callers already turn into a
 // NETWORK_ERROR result), never the whole page with a 500.
 export async function fetchRenderedHtmlResilient(url: string, timeoutMs?: number): Promise<RenderedPage> {
+  const session = renderSessionStore.getStore();
+  if (session) return session.fetch(url, timeoutMs);
   if (process.env.VERCEL) {
     const { fetchRenderedHtmlServerlessResilient } = await import("./serverlessBrowserFetcher");
     return fetchRenderedHtmlServerlessResilient(url, timeoutMs);
   }
   const { fetchRenderedHtmlResilient: fetchLocalResilient } = await import("./browserFetcher");
   return fetchLocalResilient(url, timeoutMs);
+}
+
+const renderSessionStore = new AsyncLocalStorage<ServerlessRenderSession>();
+
+/**
+ * Runs `fn` with one shared browser for every page it renders, so a cron
+ * run or a search crawl launches Chromium once instead of once per product
+ * (see createServerlessRenderSession). Any collector called inside `fn`
+ * picks the session up automatically through AsyncLocalStorage; nothing
+ * needs to be passed down.
+ *
+ * Only matters on Vercel. Locally, browserFetcher.ts already keeps one
+ * browser alive for the whole process. Nested calls reuse the outer session.
+ */
+export async function withRenderSession<T>(fn: () => Promise<T>): Promise<T> {
+  if (!process.env.VERCEL || renderSessionStore.getStore()) return fn();
+  const { createServerlessRenderSession } = await import("./serverlessBrowserFetcher");
+  const session = createServerlessRenderSession();
+  try {
+    return await renderSessionStore.run(session, fn);
+  } finally {
+    await session.close();
+  }
 }

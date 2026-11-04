@@ -33,8 +33,28 @@ export { isBotChallengePage };
  *    useful information, not a bug in this file.
  */
 
+/**
+ * `executablePath()` unpacks the compressed Chromium binary into /tmp. Two
+ * concurrent calls in the same instance race: one is still writing
+ * /tmp/chromium while the other tries to run it, and the launch fails with
+ * "spawn ETXTBSY" (seen in production on 2026-11-03 with scheduler
+ * concurrency 2). Unpacking once per instance and sharing the promise
+ * removes the race. A failed unpack is forgotten so the next call retries.
+ */
+let executablePathPromise: Promise<string> | null = null;
+
+function getExecutablePath(): Promise<string> {
+  if (!executablePathPromise) {
+    executablePathPromise = sparticuzChromium.executablePath().catch((err: unknown) => {
+      executablePathPromise = null;
+      throw err;
+    });
+  }
+  return executablePathPromise;
+}
+
 async function launchServerlessBrowser(): Promise<Browser> {
-  const executablePath = await sparticuzChromium.executablePath();
+  const executablePath = await getExecutablePath();
   return chromium.launch({
     args: sparticuzChromium.args,
     executablePath,
@@ -91,4 +111,65 @@ export async function fetchRenderedHtmlServerlessResilient(url: string, timeoutM
   } finally {
     await browser.close();
   }
+}
+
+/**
+ * One browser shared by every page rendered during a session (one cron run,
+ * one search crawl). Launching Chromium costs seconds and a few hundred MB,
+ * so doing it once per run instead of once per product is what lets a whole
+ * cycle fit in the function's time limit. Concurrent fetches each get their
+ * own tab in the same browser.
+ *
+ * The browser launches lazily on the first fetch (a run with nothing due
+ * never starts one). If it crashes mid-run, the next fetch launches a fresh
+ * one instead of failing every remaining product.
+ */
+export interface ServerlessRenderSession {
+  fetch(url: string, timeoutMs?: number): Promise<RenderedPage>;
+  close(): Promise<void>;
+}
+
+export function createServerlessRenderSession(
+  /** Overridable only for tests (scripts/verify/test-render-session.ts). */
+  launch: () => Promise<Browser> = launchServerlessBrowser
+): ServerlessRenderSession {
+  let browserPromise: Promise<Browser> | null = null;
+
+  async function getBrowser(): Promise<Browser> {
+    if (browserPromise) {
+      const browser = await browserPromise.catch(() => null);
+      if (browser?.isConnected()) return browser;
+      browserPromise = null;
+    }
+    browserPromise = launch();
+    return browserPromise;
+  }
+
+  async function renderResilient(url: string, timeoutMs: number): Promise<RenderedPage> {
+    const browser = await getBrowser();
+    const first = await renderWithBrowser(browser, url, timeoutMs);
+    if (!isBotChallengePage(first.html)) return first;
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    return renderWithBrowser(browser, url, timeoutMs);
+  }
+
+  return {
+    async fetch(url, timeoutMs = 20_000) {
+      try {
+        return await renderResilient(url, timeoutMs);
+      } catch (err) {
+        // Browser died under us (crash, OOM): one retry on a fresh browser.
+        // Any other failure (timeout, page error) is the page's problem.
+        const browser = browserPromise ? await browserPromise.catch(() => null) : null;
+        if (browser && browser.isConnected()) throw err;
+        browserPromise = null;
+        return renderResilient(url, timeoutMs);
+      }
+    },
+    async close() {
+      const browser = browserPromise ? await browserPromise.catch(() => null) : null;
+      browserPromise = null;
+      await browser?.close().catch(() => {});
+    },
+  };
 }

@@ -1,5 +1,6 @@
 import { searchOliveYoungGoodsNos, goodsNoToSourceUrl } from "@/collectors/oliveyoung/searchCollector";
 import type { SearchCrawlResult, SearchCrawlStatus } from "@/collectors/oliveyoung/searchCollector";
+import { withRenderSession } from "@/collectors/oliveyoung/renderPage";
 import { ensureProductCollected, type Collector } from "./collection";
 import type { CollectStatus, Product } from "./types";
 
@@ -50,6 +51,16 @@ export async function crawlOliveYoungByKeyword(
   limit = 3,
   searchFn: KeywordSearcher = searchOliveYoungGoodsNos,
   collector?: Collector
+): Promise<KeywordCrawlOutcome> {
+  // One browser for the search page and all product pages it leads to.
+  return withRenderSession(() => crawlWithinSession(keyword, limit, searchFn, collector));
+}
+
+async function crawlWithinSession(
+  keyword: string,
+  limit: number,
+  searchFn: KeywordSearcher,
+  collector: Collector | undefined
 ): Promise<KeywordCrawlOutcome> {
   const searchResult = await searchFn(keyword, limit);
   if (searchResult.status !== "SUCCESS") {
