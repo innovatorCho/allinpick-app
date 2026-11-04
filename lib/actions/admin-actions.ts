@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/session";
 import { setCuratorUrl, getProductById } from "@/lib/domain/products";
 import { recollectProduct } from "@/lib/domain/collection";
+import { withLoggedCollection } from "@/lib/collectionRun";
 import { collectOliveYoungProductServerless } from "@/collectors/oliveyoung/serverlessProductCollector";
 import { generateSampleData } from "@/lib/domain/seed";
 import { runSchedulerNow, updateSchedulerConfig } from "@/lib/priceScheduler";
@@ -69,7 +70,7 @@ export interface RecollectState {
 
 export async function recollectProductAction(productId: string): Promise<void> {
   await requireAdmin();
-  await recollectProduct(productId);
+  await withLoggedCollection("recollect", `가격 다시 확인 · ${productId}`, () => recollectProduct(productId));
   revalidatePath(`/admin/products/${productId}`);
   revalidatePath(`/product/${productId}`);
   revalidatePath("/admin");

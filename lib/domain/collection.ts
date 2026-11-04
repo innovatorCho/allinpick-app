@@ -1,3 +1,4 @@
+import { runLog } from "@/lib/runLog";
 import {
   resolveOliveYoungProductId,
   InvalidOliveYoungUrlError,
@@ -53,9 +54,13 @@ export async function ensureProductCollected(
 ): Promise<RegisterProductResult> {
   const productId = await resolveOliveYoungProductId(sourceUrl);
   const canonicalUrl = toCanonicalSourceUrl(productId);
+  runLog(`상품 ID 확인: ${productId}`);
 
   if (!(await getProductById(productId))) {
     await createPlaceholderProduct({ id: productId, sourceUrl: canonicalUrl });
+    runLog("새 상품으로 등록하고 가격 수집을 시작합니다.");
+  } else {
+    runLog("이미 등록된 상품이라 가격만 다시 수집합니다.");
   }
 
   const outcome = await runCollection(productId, collector);
@@ -75,6 +80,7 @@ export async function registerProductForUser(
 ): Promise<RegisterProductResult> {
   const result = await ensureProductCollected(sourceUrl, collector);
   await trackProduct(userId, result.product.id);
+  runLog(`사용자 ${userId}의 관심 상품에 추가했습니다.`);
   return result;
 }
 

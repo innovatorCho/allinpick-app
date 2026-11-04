@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
 import { recordError } from "@/lib/domain/errorLogs";
+import { withLoggedCollection } from "@/lib/collectionRun";
 import {
   InvalidOliveYoungUrlError,
   registerProductForUser,
@@ -35,7 +36,9 @@ export async function registerProductAction(
 
   let productId: string;
   try {
-    const result = await registerProductForUser(url, user.id);
+    const result = await withLoggedCollection("register", `상품 등록 · ${url} · 사용자 ${user.id}`, () =>
+      registerProductForUser(url, user.id)
+    );
     productId = result.product.id;
   } catch (err) {
     if (err instanceof InvalidOliveYoungUrlError) {
