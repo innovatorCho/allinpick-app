@@ -4,6 +4,7 @@ import { ProductCard } from "@/components/ProductCard";
 import { RegisterProductForm } from "@/components/RegisterProductForm";
 import { OliveYoungCrawlResults } from "@/components/OliveYoungCrawlResults";
 import { getCurrentUser } from "@/lib/session";
+import { canCollectHere } from "@/lib/collectMode";
 
 const URL_LIKE = /^https?:\/\//i;
 
@@ -59,13 +60,28 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
         )
       ) : results.length === 0 ? (
         <div className="flex flex-col gap-4">
-          <p className="text-sm text-zinc-500">&quot;{query}&quot; 상품을 올리브영에서 찾아볼게요.</p>
-          <Suspense
-            key={query}
-            fallback={<p className="text-sm text-zinc-500">올리브영에서 검색 중...</p>}
-          >
-            <OliveYoungCrawlResults keyword={query} showDiagnostics={isAdmin} />
-          </Suspense>
+          {canCollectHere() ? (
+            <>
+              <p className="text-sm text-zinc-500">&quot;{query}&quot; 상품을 올리브영에서 찾아볼게요.</p>
+              <Suspense
+                key={query}
+                fallback={<p className="text-sm text-zinc-500">올리브영에서 검색 중...</p>}
+              >
+                <OliveYoungCrawlResults keyword={query} showDiagnostics={isAdmin} />
+              </Suspense>
+            </>
+          ) : (
+            // Where this server can't open OliveYoung (Vercel, see lib/collectMode.ts),
+            // a live keyword search would only time out; registering by link goes
+            // through the collector worker instead.
+            <div className="flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                &quot;{query}&quot;와(과) 일치하는 상품이 아직 없어요. 올리브영에서 상품 링크를 복사해 붙여넣으면 바로
+                등록하고 가격 알림을 받을 수 있어요.
+              </p>
+              <RegisterProductForm />
+            </div>
+          )}
           {allProducts.length > 0 && (
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">이런 상품은 어떠세요?</p>

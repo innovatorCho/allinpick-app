@@ -20,6 +20,7 @@ import {
   deleteResolvedErrorLogsOlderThan,
 } from "@/lib/domain/errorLogs";
 import { saveSiteSettings, SITE_SETTING_FIELDS, type SiteSettingKey } from "@/lib/domain/siteSettings";
+import { endBotBlockWaitNow } from "@/lib/domain/botBlockCooldown";
 import type { NotificationType } from "@/lib/domain/types";
 
 /** Shared across every FormState-returning action below — a DB-connection
@@ -144,6 +145,13 @@ export async function updateSchedulerConfigAction(
 export async function toggleSchedulerAction(enabled: boolean): Promise<void> {
   await requireAdmin();
   await updateSchedulerConfig({ enabled });
+  revalidatePath("/admin/schedule");
+}
+
+/** Admin "지금 확인": ends the bot-block wait so the worker's next poll sends one probe request. */
+export async function endBotBlockWaitAction(): Promise<void> {
+  await requireAdmin();
+  await endBotBlockWaitNow();
   revalidatePath("/admin/schedule");
 }
 

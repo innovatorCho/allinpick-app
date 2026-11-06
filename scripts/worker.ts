@@ -14,12 +14,37 @@
  *    schedule settings (30 min by default, longer for stable products).
  * A cycle with nothing due is a single DB query.
  *
+ * Admin settings (pause, concurrency) are re-read before every run, and the
+ * worker reports its state to the DB every 30s (lib/domain/workerStatus.ts)
+ * so the admin schedule page shows whether collection is running.
+ *
  * Only one worker should run at a time; two would collect the same products.
  */
+import { hostname } from "node:os";
 import { runOneCycle } from "@/lib/priceScheduler";
 import { listUncollectedTrackedProductIds, markDueNow } from "@/lib/domain/products";
+import { saveWorkerStatus, type WorkerStatus } from "@/lib/domain/workerStatus";
 
 const POLL_INTERVAL_MS = 30_000;
+
+const status: WorkerStatus = {
+  host: hostname(),
+  startedAt: new Date().toISOString(),
+  lastPollAt: new Date().toISOString(),
+  cycleStartedAt: null,
+  stoppedAt: null,
+  lastRun: null,
+};
+
+/** A DB blip while reporting must never stop collection. */
+async function reportStatus(): Promise<void> {
+  status.lastPollAt = new Date().toISOString();
+  try {
+    await saveWorkerStatus(status);
+  } catch (err) {
+    console.error("[worker] 상태 기록 실패 (수집은 계속합니다):", err instanceof Error ? err.message : err);
+  }
+}
 
 let stopping = false;
 let wakeUp: (() => void) | null = null;
@@ -68,10 +93,22 @@ async function main(): Promise<void> {
     console.log(`[worker] 아직 정보가 없는 상품 ${uncollected.length}개를 먼저 수집합니다.`);
   }
 
+  await reportStatus();
+  // Keeps lastPollAt fresh during a long run too, so the admin page doesn't
+  // report the worker as stopped while it's busy collecting.
+  const heartbeat = setInterval(() => void reportStatus(), POLL_INTERVAL_MS);
+
   while (!stopping) {
-    await runOneCycle(undefined, { quietWhenIdle: true });
+    status.cycleStartedAt = new Date().toISOString();
+    const summary = await runOneCycle(undefined, { quietWhenIdle: true, reloadSettings: true });
+    status.cycleStartedAt = null;
+    if (summary) status.lastRun = summary;
+    await reportStatus();
     if (!stopping) await sleep(POLL_INTERVAL_MS);
   }
+  clearInterval(heartbeat);
+  status.stoppedAt = new Date().toISOString();
+  await reportStatus();
   console.log("[worker] 종료합니다.");
   process.exit(0); // the local browser (browserFetcher.ts) would otherwise keep the process alive
 }

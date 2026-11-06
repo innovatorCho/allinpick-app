@@ -136,6 +136,12 @@ async function runCollection(productId: string, collector: Collector): Promise<C
     // Existing price is intentionally left untouched — a failed collection
     // is a normal outcome, not data loss (AGENTS.md §4, TEST5).
     await recordCollectionFailure(productId, collectResult.status, collectResult.error, collectResult.checkedAt);
+    if (collectResult.status === "BOT_BLOCKED") {
+      // The block is on the whole connection, not this product, so no
+      // failure backoff: it stays due, and the scheduler's block pause
+      // (lib/domain/botBlockCooldown.ts) decides when anything is tried again.
+      return { collectResult, changeType: null };
+    }
     await updateSchedulingMeta(
       productId,
       computeNextSchedule({

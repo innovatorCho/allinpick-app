@@ -22,6 +22,8 @@ import {
 import { getDb } from "@/lib/db/client";
 import { getTracking } from "@/lib/domain/tracking";
 import { runOneCycle } from "@/lib/priceScheduler";
+import { persistConcurrency, persistEnabled } from "@/lib/domain/schedulerSettings";
+import { getWorkerStatus, isWorkerOnline, saveWorkerStatus, WORKER_OFFLINE_AFTER_MS } from "@/lib/domain/workerStatus";
 import { canCollectHere } from "@/lib/collectMode";
 import { isAwaitingFirstCollection } from "@/lib/collectStatusLabels";
 import { ensureUsersSeeded } from "@/lib/domain/users";
@@ -159,6 +161,60 @@ async function main() {
       else process.env.VERCEL = saved;
     }
     assert.deepEqual(calls, []);
+  });
+
+  await test("a run returns what it did, and null when nothing was due", async () => {
+    // Q0002 and Q0003 were both left due by the catch-up test above.
+    const summary = await runOneCycle(collector("SUCCESS"), { quietWhenIdle: true });
+    assert.ok(summary);
+    assert.equal(summary.total, 2);
+    assert.equal(summary.succeeded, 2);
+    assert.equal(summary.failed, 0);
+    assert.equal(await runOneCycle(collector("SUCCESS"), { quietWhenIdle: true }), null);
+  });
+
+  await test("the worker picks up a pause saved by the admin page without restarting", async () => {
+    // Saved straight to the DB, like the admin page on Vercel does; this
+    // process's in-memory settings still say "enabled".
+    await persistEnabled(false);
+    await markDueNow("Q0002");
+    const calls: string[] = [];
+    assert.equal(await runOneCycle(collector("SUCCESS", calls), { quietWhenIdle: true, reloadSettings: true }), null);
+    assert.deepEqual(calls, [], "paused: nothing collected");
+
+    await persistEnabled(true);
+    await runOneCycle(collector("SUCCESS", calls), { quietWhenIdle: true, reloadSettings: true });
+    assert.deepEqual(calls, ["Q0002"], "resumed: collected again");
+  });
+
+  await test("the worker picks up a concurrency change without restarting", async () => {
+    await persistConcurrency(1);
+    await markDueNow("Q0002");
+    await markDueNow("Q0003");
+    let active = 0;
+    let maxActive = 0;
+    const tracking: Collector = async (sourceUrl) => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 20));
+      active -= 1;
+      return collector("SUCCESS")(sourceUrl);
+    };
+    await runOneCycle(tracking, { quietWhenIdle: true, reloadSettings: true });
+    assert.equal(maxActive, 1);
+  });
+
+  await test("worker status: saved and read back, online only while recent and not stopped", async () => {
+    assert.equal(await getWorkerStatus(), null);
+    assert.equal(isWorkerOnline(null), false);
+    const now = new Date().toISOString();
+    const status = { host: "test-mac", startedAt: now, lastPollAt: now, cycleStartedAt: null, stoppedAt: null, lastRun: null };
+    await saveWorkerStatus(status);
+    const saved = await getWorkerStatus();
+    assert.deepEqual(saved, status);
+    assert.equal(isWorkerOnline(saved), true);
+    assert.equal(isWorkerOnline(saved, Date.now() + WORKER_OFFLINE_AFTER_MS + 1000), false, "silent too long");
+    assert.equal(isWorkerOnline({ ...status, stoppedAt: now }), false, "stopped with Ctrl+C");
   });
 
   await test("deleting a product removes it with its history, logs and every user's tracking", async () => {
