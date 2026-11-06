@@ -11,6 +11,7 @@ import {
   countTrackers,
   createPlaceholderProduct,
   getProductById,
+  markDueNow,
   recordCollectionFailure,
   updateProductMetadataAndPrice,
   updateSchedulingMeta,
@@ -82,6 +83,28 @@ export async function registerProductForUser(
   await trackProduct(userId, result.product.id);
   runLog(`사용자 ${userId}의 관심 상품에 추가했습니다.`);
   return result;
+}
+
+/**
+ * Registration where this process can't collect (lib/collectMode.ts): saves
+ * the product and the user's tracking without opening OliveYoung, and leaves
+ * the product due so the collector worker fills it in on its next pass. A
+ * product that has never been collected is moved to the front of the queue
+ * even if it's in failure backoff, since someone is now waiting for it.
+ */
+export async function queueProductForUser(sourceUrl: string, userId: string): Promise<Product> {
+  const productId = await resolveOliveYoungProductId(sourceUrl);
+  let product = await getProductById(productId);
+  if (!product) {
+    product = await createPlaceholderProduct({ id: productId, sourceUrl: toCanonicalSourceUrl(productId) });
+    runLog(`새 상품 ${productId}을(를) 수집 대기열에 넣었습니다.`);
+  } else if (product.salePrice == null) {
+    await markDueNow(productId);
+    runLog(`아직 정보가 없는 상품 ${productId}을(를) 대기열 맨 앞으로 옮겼습니다.`);
+  }
+  await trackProduct(userId, productId);
+  runLog(`사용자 ${userId}의 관심 상품에 추가했습니다.`);
+  return product;
 }
 
 /** Manually re-runs collection for an already-registered product (admin "가격 다시 확인"). */

@@ -4,6 +4,7 @@ import { recollectProduct, type Collector } from "@/lib/domain/collection";
 import { withRenderSession } from "@/collectors/oliveyoung/renderPage";
 import { errorDetail, newRunId, resourceSnapshot, runLog, runWarn, seconds, withRunLog } from "@/lib/runLog";
 import { collectFailureCategory } from "@/lib/collectFailureCategory";
+import { canCollectHere } from "@/lib/collectMode";
 import {
   loadSchedulerSettings,
   persistConcurrency,
@@ -274,6 +275,8 @@ export const CYCLE_START_CUTOFF_MARGIN_MS = 120_000;
 export interface RunCycleOptions {
   /** Epoch ms after which no new product is started; the rest stay due for the next run. */
   stopStartingAt?: number;
+  /** Log nothing when no product is due (the worker polls every 30s). */
+  quietWhenIdle?: boolean;
 }
 
 export async function runOneCycle(collector?: Collector, options: RunCycleOptions = {}): Promise<void> {
@@ -284,6 +287,12 @@ export async function runOneCycle(collector?: Collector, options: RunCycleOption
 async function runOneCycleLogged(collector: Collector | undefined, options: RunCycleOptions): Promise<void> {
   const state = await ensureSettingsLoaded();
 
+  if (!canCollectHere()) {
+    // Covers the cron route, external pingers and the admin "지금 바로 실행"
+    // button alike: on Vercel every attempt only timed out (lib/collectMode.ts).
+    runLog("건너뜀: 이 서버에서는 수집하지 않습니다. 수집은 수집 프로그램(npm run worker)이 합니다.");
+    return;
+  }
   if (!state.enabled) {
     runLog("건너뜀: 스케줄러가 일시정지 상태입니다.");
     return;
@@ -305,6 +314,7 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
 
   try {
     const targets = await listDueTrackedProducts(startedAt.toISOString(), MAX_PRODUCTS_PER_TICK);
+    if (targets.length === 0 && options.quietWhenIdle) return;
     const cutoffNote =
       options.stopStartingAt != null
         ? ` · 새 상품 시작 마감 ${seconds(options.stopStartingAt - startedAt.getTime())} 후`

@@ -14,3 +14,14 @@ export function collectStatusLabel(status: CollectStatus | null): string {
   if (!status) return "수집 전";
   return COLLECT_STATUS_LABELS[status] ?? status;
 }
+
+/** Shown in place of a product's name while its details are still being fetched. */
+export const AWAITING_INFO_LABEL = "상품 정보를 가져오는 중";
+
+/**
+ * Registered, but no collection has succeeded yet, so name, image and price
+ * are still placeholders (a successful collection always sets sale_price).
+ */
+export function isAwaitingFirstCollection(product: { salePrice: number | null }): boolean {
+  return product.salePrice == null;
+}

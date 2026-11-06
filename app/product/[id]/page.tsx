@@ -5,9 +5,10 @@ import { listPriceHistory } from "@/lib/domain/priceHistory";
 import { getTracking } from "@/lib/domain/tracking";
 import { getCurrentUser } from "@/lib/session";
 import { formatKrw, formatDateTime, formatDate } from "@/lib/format";
-import { collectStatusLabel } from "@/lib/collectStatusLabels";
+import { AWAITING_INFO_LABEL, collectStatusLabel, isAwaitingFirstCollection } from "@/lib/collectStatusLabels";
 import { getSiteSettings } from "@/lib/domain/siteSettings";
 import { PriceChart } from "@/components/PriceChart";
+import { AutoRefresh } from "@/components/AutoRefresh";
 import { TrackButton } from "@/components/TrackButton";
 import { TargetPriceForm } from "@/components/TargetPriceForm";
 
@@ -32,11 +33,15 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
   const trackerCount = await countTrackers(id);
 
   const isAdmin = currentUser?.role === "admin";
-  const { priceDisclaimer } = await getSiteSettings();
+  const { priceDisclaimer, pendingProductNotice, pendingProductRetryNotice } = await getSiteSettings();
   const collectionFailed = product.lastCollectStatus && product.lastCollectStatus !== "SUCCESS";
+  // Registered but never collected yet: the collector worker fills it in shortly.
+  const awaitingInfo = isAwaitingFirstCollection(product);
+  const awaitingNotice = product.consecutiveFailures > 0 ? pendingProductRetryNotice : pendingProductNotice;
 
   return (
     <div className="flex flex-col gap-6">
+      {awaitingInfo && <AutoRefresh intervalMs={15_000} stopAfterMs={10 * 60_000} />}
       <div className="flex gap-4">
         <div className="h-32 w-32 flex-shrink-0 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
           {product.imageUrl ? (
@@ -44,24 +49,43 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
             <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
           ) : null}
         </div>
-        <div className="flex flex-col justify-center gap-1">
-          <p className="text-sm text-zinc-500">{product.brand}</p>
-          <h1 className="text-lg font-semibold">{product.name}</h1>
-          <div className="flex items-baseline gap-2">
-            {product.discountRate ? (
-              <span className="text-xl font-bold text-red-600">{product.discountRate}%</span>
-            ) : null}
-            <span className="text-xl font-bold">{formatKrw(product.salePrice)}</span>
-            {product.normalPrice != null && product.normalPrice !== product.salePrice && (
-              <span className="text-sm text-zinc-400 line-through">{formatKrw(product.normalPrice)}</span>
-            )}
+        {awaitingInfo ? (
+          <div className="flex flex-col justify-center gap-1">
+            <p className="text-sm text-zinc-500">올리브영 상품 {product.id}</p>
+            <h1 className="text-lg font-semibold">{AWAITING_INFO_LABEL}</h1>
+            <p className="text-xs text-zinc-500">{trackerCount.toLocaleString("ko-KR")}명이 가격을 지켜보는 중</p>
           </div>
-          <p className="text-xs text-zinc-500">가격 확인: {formatDateTime(product.lastCheckedAt)}</p>
-          <p className="text-xs text-zinc-500">{trackerCount.toLocaleString("ko-KR")}명이 가격을 지켜보는 중</p>
-        </div>
+        ) : (
+          <div className="flex flex-col justify-center gap-1">
+            <p className="text-sm text-zinc-500">{product.brand}</p>
+            <h1 className="text-lg font-semibold">{product.name}</h1>
+            <div className="flex items-baseline gap-2">
+              {product.discountRate ? (
+                <span className="text-xl font-bold text-red-600">{product.discountRate}%</span>
+              ) : null}
+              <span className="text-xl font-bold">{formatKrw(product.salePrice)}</span>
+              {product.normalPrice != null && product.normalPrice !== product.salePrice && (
+                <span className="text-sm text-zinc-400 line-through">{formatKrw(product.normalPrice)}</span>
+              )}
+            </div>
+            <p className="text-xs text-zinc-500">가격 확인: {formatDateTime(product.lastCheckedAt)}</p>
+            <p className="text-xs text-zinc-500">{trackerCount.toLocaleString("ko-KR")}명이 가격을 지켜보는 중</p>
+          </div>
+        )}
       </div>
 
-      {collectionFailed && (
+      {awaitingInfo && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200">
+          {awaitingNotice && <p className="whitespace-pre-line break-keep">{awaitingNotice}</p>}
+          {isAdmin && collectionFailed && (
+            <p className="mt-1 text-xs">
+              {collectStatusLabel(product.lastCollectStatus)}: {product.lastCollectError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {collectionFailed && !awaitingInfo && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
           <p>최신 가격을 불러오지 못해 마지막으로 확인된 가격을 보여드리고 있어요.</p>
           {isAdmin && (
@@ -72,9 +96,11 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
         </div>
       )}
 
-      <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-        <PriceChart history={history} />
-      </div>
+      {!awaitingInfo && (
+        <div className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+          <PriceChart history={history} />
+        </div>
+      )}
 
       {recentChanges.length > 0 && (
         <div className="flex flex-col gap-1">

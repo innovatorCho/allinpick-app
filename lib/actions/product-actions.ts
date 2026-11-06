@@ -5,8 +5,11 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
 import { recordError } from "@/lib/domain/errorLogs";
 import { withLoggedCollection } from "@/lib/collectionRun";
+import { canCollectHere } from "@/lib/collectMode";
+import { newRunId, runLog, withRunLog } from "@/lib/runLog";
 import {
   InvalidOliveYoungUrlError,
+  queueProductForUser,
   registerProductForUser,
 } from "@/lib/domain/collection";
 
@@ -36,10 +39,19 @@ export async function registerProductAction(
 
   let productId: string;
   try {
-    const result = await withLoggedCollection("register", `상품 등록 · ${url} · 사용자 ${user.id}`, () =>
-      registerProductForUser(url, user.id)
-    );
-    productId = result.product.id;
+    const description = `상품 등록 · ${url} · 사용자 ${user.id}`;
+    if (canCollectHere()) {
+      const result = await withLoggedCollection("register", description, () => registerProductForUser(url, user.id));
+      productId = result.product.id;
+    } else {
+      // The collector worker fills in name/price shortly; the detail page
+      // shows a "가져오는 중" notice until then (lib/collectMode.ts).
+      const product = await withRunLog("register", newRunId(), () => {
+        runLog(`===== ${description} · 수집 대기열에 등록 =====`);
+        return queueProductForUser(url, user.id);
+      });
+      productId = product.id;
+    }
   } catch (err) {
     if (err instanceof InvalidOliveYoungUrlError) {
       // A validation message written for shoppers ("올리브영 상품 URL이 아닙니다" etc.), safe to show as-is.

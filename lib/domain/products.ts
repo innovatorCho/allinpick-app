@@ -261,6 +261,34 @@ export async function listDueTrackedProducts(nowIso: string, limit?: number): Pr
   return rows.map(toProduct);
 }
 
+/**
+ * Puts a product at the front of the collector's queue (next_check_at NULL
+ * sorts first in listDueTrackedProducts). Used where the site can't collect
+ * itself (lib/collectMode.ts): registration and the admin "가격 다시 확인"
+ * button just ask the worker to pick it up on its next pass.
+ */
+export async function markDueNow(id: string): Promise<void> {
+  const db = await getDb();
+  await db.prepare(`UPDATE products SET next_check_at = NULL WHERE oliveyoung_product_id = ?`).run(id);
+}
+
+/**
+ * Tracked products that have never been collected successfully. The worker
+ * makes these due again when it starts, so products that failed on Vercel
+ * (and are now sitting in failure backoff) get filled in right away.
+ */
+export async function listUncollectedTrackedProductIds(): Promise<string[]> {
+  const db = await getDb();
+  const rows = (await db
+    .prepare(
+      `SELECT DISTINCT p.oliveyoung_product_id AS id FROM products p
+       INNER JOIN user_tracking t ON t.product_id = p.oliveyoung_product_id
+       WHERE p.sale_price IS NULL`
+    )
+    .all()) as unknown as { id: string }[];
+  return rows.map((r) => r.id);
+}
+
 export async function updateSchedulingMeta(
   id: string,
   fields: { nextCheckAt: string; consecutiveFailures: number; consecutiveSameCount: number }

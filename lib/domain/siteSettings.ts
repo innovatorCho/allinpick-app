@@ -19,7 +19,9 @@ export type SiteSettingKey =
   | "contactEmail"
   | "privacyEffectiveDate"
   | "priceDisclaimer"
-  | "footerNotice";
+  | "footerNotice"
+  | "pendingProductNotice"
+  | "pendingProductRetryNotice";
 
 export interface SiteSettingField {
   key: SiteSettingKey;
@@ -106,6 +108,26 @@ export const SITE_SETTING_FIELDS: SiteSettingField[] = [
     required: false,
     multiline: true,
     maxLength: 500,
+  },
+  {
+    key: "pendingProductNotice",
+    env: "SITE_PENDING_PRODUCT_NOTICE",
+    label: "상품 정보 수집 중 안내",
+    help: "방금 등록해서 아직 이름과 가격을 가져오지 못한 상품의 상세 화면에 표시돼요.",
+    defaultValue: "등록이 완료됐어요. 상품 이름과 가격을 가져오는 중이에요. 보통 1~2분 안에 채워져요.",
+    required: false,
+    multiline: true,
+    maxLength: 300,
+  },
+  {
+    key: "pendingProductRetryNotice",
+    env: "SITE_PENDING_PRODUCT_RETRY_NOTICE",
+    label: "상품 정보 재시도 안내",
+    help: "등록한 상품의 정보를 가져오지 못해 다시 시도하는 동안 상세 화면에 표시돼요.",
+    defaultValue: "등록은 완료됐지만 상품 정보를 아직 가져오지 못했어요. 자동으로 다시 시도하고 있으니 잠시 후 확인해주세요.",
+    required: false,
+    multiline: true,
+    maxLength: 300,
   },
 ];
 
