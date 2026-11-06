@@ -237,9 +237,9 @@ export async function getDb(): Promise<DbHandle> {
 /**
  * Runs `fn` inside a real libSQL transaction (proper BEGIN/COMMIT/ROLLBACK
  * over the wire, not separate .exec() calls — a Turso HTTP connection can't
- * guarantee those land on the same session otherwise). Currently only used
- * by lib/domain/users.ts's createOAuthUser (insert user + insert linked
- * oauth_accounts row atomically).
+ * guarantee those land on the same session otherwise). Used by
+ * lib/domain/users.ts's createOAuthUser (insert user + insert linked
+ * oauth_accounts row atomically) and lib/domain/products.ts's deleteProduct.
  */
 export async function runInTransaction<T>(fn: (tx: DbHandle) => Promise<T>): Promise<T> {
   const client = getClient();

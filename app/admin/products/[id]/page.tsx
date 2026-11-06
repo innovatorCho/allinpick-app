@@ -7,6 +7,7 @@ import { formatDateTime, formatKrw } from "@/lib/format";
 import { collectStatusLabel } from "@/lib/collectStatusLabels";
 import { CuratorUrlForm } from "@/components/CuratorUrlForm";
 import { RecollectButton } from "@/components/RecollectButton";
+import { DeleteProductButton } from "@/components/DeleteProductButton";
 import { ServerlessCrawlerTestTool } from "@/components/ServerlessCrawlerTestTool";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -112,6 +113,14 @@ export default async function AdminProductDetailPage({ params }: PageProps<"/adm
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">상품 삭제</h2>
+        <p className="text-xs text-zinc-500">
+          잘못 등록됐거나 더 이상 판매하지 않는 상품을 지웁니다. 가격 이력과 사용자들의 추적도 함께 지워집니다.
+        </p>
+        <DeleteProductButton productId={product.id} trackerCount={trackerCount} />
       </div>
 
       <div className="flex flex-col gap-2">

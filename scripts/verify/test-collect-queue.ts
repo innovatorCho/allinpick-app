@@ -17,7 +17,9 @@ import {
   listDueTrackedProducts,
   listUncollectedTrackedProductIds,
   markDueNow,
+  deleteProduct,
 } from "@/lib/domain/products";
+import { getDb } from "@/lib/db/client";
 import { getTracking } from "@/lib/domain/tracking";
 import { runOneCycle } from "@/lib/priceScheduler";
 import { canCollectHere } from "@/lib/collectMode";
@@ -157,6 +159,20 @@ async function main() {
       else process.env.VERCEL = saved;
     }
     assert.deepEqual(calls, []);
+  });
+
+  await test("deleting a product removes it with its history, logs and every user's tracking", async () => {
+    assert.equal(await deleteProduct("Q0001"), true);
+    assert.equal(await getProductById("Q0001"), null);
+    assert.equal(await getTracking("user-a", "Q0001"), null);
+    assert.equal(await getTracking("user-b", "Q0001"), null);
+    const db = await getDb();
+    for (const table of ["price_history", "collect_logs", "user_tracking", "notifications", "kakao_send_logs"]) {
+      const row = (await db.prepare(`SELECT COUNT(*) AS cnt FROM ${table} WHERE product_id = ?`).get("Q0001")) as { cnt: number };
+      assert.equal(Number(row.cnt), 0, `${table} should be empty`);
+    }
+    assert.ok(await getProductById("Q0002"), "other products are untouched");
+    assert.equal(await deleteProduct("Q0001"), false, "deleting twice reports nothing deleted");
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

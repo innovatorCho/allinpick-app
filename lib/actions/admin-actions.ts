@@ -1,12 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/session";
-import { setCuratorUrl, getProductById } from "@/lib/domain/products";
+import { setCuratorUrl, getProductById, deleteProduct, markDueNow } from "@/lib/domain/products";
 import { recollectProduct } from "@/lib/domain/collection";
 import { withLoggedCollection } from "@/lib/collectionRun";
 import { canCollectHere } from "@/lib/collectMode";
-import { markDueNow } from "@/lib/domain/products";
 import { collectOliveYoungProductServerless } from "@/collectors/oliveyoung/serverlessProductCollector";
 import { generateSampleData } from "@/lib/domain/seed";
 import { runSchedulerNow, updateSchedulerConfig } from "@/lib/priceScheduler";
@@ -14,6 +14,7 @@ import { createNotification } from "@/lib/domain/notifications";
 import { setKakaoTemplate, resetKakaoTemplate } from "@/lib/domain/kakaoTemplates";
 import { DbConnectionError, DbConfigError } from "@/lib/db/client";
 import {
+  recordError,
   resolveErrorLog,
   reopenErrorLog,
   deleteResolvedErrorLogsOlderThan,
@@ -81,6 +82,23 @@ export async function recollectProductAction(productId: string): Promise<void> {
   revalidatePath(`/product/${productId}`);
   revalidatePath("/admin");
   revalidatePath("/");
+}
+
+export interface DeleteProductState {
+  error?: string;
+}
+
+/** Admin "상품 삭제": removes the product with its history and every user's tracking of it. */
+export async function deleteProductAction(productId: string): Promise<DeleteProductState> {
+  await requireAdmin();
+  try {
+    await deleteProduct(productId);
+  } catch (err) {
+    await recordError({ source: "action:deleteProduct", error: err, context: { productId } });
+    return { error: dbErrorMessage(err) ?? "상품을 삭제하지 못했습니다. 오류 로그를 확인해주세요." };
+  }
+  revalidatePath("/", "layout");
+  redirect("/admin");
 }
 
 /** Dev-only sample data generator, wired to an admin-screen button (AGENTS.md §16). */

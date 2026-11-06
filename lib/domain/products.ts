@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db/client";
+import { getDb, runInTransaction } from "@/lib/db/client";
 import type { ProductRow } from "@/lib/db/rows";
 import type { Product, ProductWithPopularity } from "./types";
 
@@ -287,6 +287,23 @@ export async function listUncollectedTrackedProductIds(): Promise<string[]> {
     )
     .all()) as unknown as { id: string }[];
   return rows.map((r) => r.id);
+}
+
+/**
+ * Admin deletion: removes the product and everything recorded for it (price
+ * history, collect logs, users' tracking, notifications, Kakao send logs).
+ * Child rows are deleted explicitly rather than relying on ON DELETE
+ * CASCADE, since `PRAGMA foreign_keys` isn't guaranteed on every Turso
+ * session. Returns false if the product didn't exist.
+ */
+export async function deleteProduct(id: string): Promise<boolean> {
+  return runInTransaction(async (tx) => {
+    for (const table of ["price_history", "collect_logs", "user_tracking", "notifications", "kakao_send_logs"]) {
+      await tx.prepare(`DELETE FROM ${table} WHERE product_id = ?`).run(id);
+    }
+    const result = await tx.prepare(`DELETE FROM products WHERE oliveyoung_product_id = ?`).run(id);
+    return Number(result.changes) > 0;
+  });
 }
 
 export async function updateSchedulingMeta(
