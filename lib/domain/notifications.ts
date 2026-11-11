@@ -1,6 +1,7 @@
 import { getDb } from "@/lib/db/client";
 import type { NotificationRow } from "@/lib/db/rows";
 import { sendKakaoNotificationBestEffort } from "@/lib/kakaoMessaging";
+import { sendProductWebPushBestEffort } from "@/lib/webPush";
 import type { AppNotification, NotificationType } from "./types";
 
 function toNotification(row: NotificationRow): AppNotification {
@@ -32,14 +33,22 @@ export async function createNotification(input: {
    * this type — see lib/kakaoMessaging.ts / lib/domain/kakaoTemplates.ts).
    * Defaults to false so the admin test tool can exercise the in-app
    * pipeline alone without also spamming a real KakaoTalk message every time.
+   * Also covers browser push (lib/webPush.ts), sent the same way.
    */
   sendKakao?: boolean;
+  /**
+   * With `sendKakao`: don't send now, queue it for the user's next batched
+   * Kakao message (lib/kakaoBatch.ts), so a run that finds many price drops
+   * becomes one summary instead of one message per product.
+   */
+  batchKakao?: boolean;
 }): Promise<void> {
+  const queue = input.sendKakao === true && input.batchKakao === true;
   const db = await getDb();
   await db
     .prepare(
-      `INSERT INTO notifications (user_id, product_id, type, message, old_price, new_price, is_read, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`
+      `INSERT INTO notifications (user_id, product_id, type, message, old_price, new_price, target_price, is_read, kakao_pending, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       input.userId,
@@ -48,22 +57,71 @@ export async function createNotification(input: {
       input.message,
       input.oldPrice,
       input.newPrice,
+      input.targetPrice ?? null,
+      queue ? 1 : 0,
       new Date().toISOString()
     );
+  if (queue) return;
 
   // The in-app notification row above is already committed — this can never
   // roll it back or delay the caller, it just best-effort mirrors it to Kakao
   // (using its own admin-configured template, not `input.message`). Not
   // awaited on purpose — fire-and-forget, same as before the DB migration.
   if (input.sendKakao) {
-    sendKakaoNotificationBestEffort(input.userId, {
+    const alert = {
       type: input.type,
       productId: input.productId,
       oldPrice: input.oldPrice,
       newPrice: input.newPrice,
       targetPrice: input.targetPrice,
-    });
+    };
+    sendKakaoNotificationBestEffort(input.userId, alert);
+    sendProductWebPushBestEffort(input.userId, alert);
   }
+}
+
+export interface PendingKakaoNotification {
+  id: number;
+  productId: string;
+  type: NotificationType;
+  oldPrice: number | null;
+  newPrice: number | null;
+  targetPrice: number | null;
+  createdAt: string;
+}
+
+/** Users with notifications waiting for their next batched Kakao message (lib/kakaoBatch.ts). */
+export async function listUsersWithPendingKakao(): Promise<string[]> {
+  const db = await getDb();
+  const rows = (await db
+    .prepare(`SELECT DISTINCT user_id FROM notifications WHERE kakao_pending = 1`)
+    .all()) as unknown as { user_id: string }[];
+  return rows.map((r) => r.user_id);
+}
+
+export async function listPendingKakaoForUser(userId: string): Promise<PendingKakaoNotification[]> {
+  const db = await getDb();
+  const rows = (await db
+    .prepare(`SELECT * FROM notifications WHERE user_id = ? AND kakao_pending = 1 ORDER BY id`)
+    .all(userId)) as unknown as NotificationRow[];
+  return rows.map((r) => ({
+    id: r.id,
+    productId: r.product_id,
+    type: r.type as NotificationType,
+    oldPrice: r.old_price,
+    newPrice: r.new_price,
+    targetPrice: r.target_price,
+    createdAt: r.created_at,
+  }));
+}
+
+/** Marks queued notifications as handled, whether the Kakao send succeeded or not (the send log keeps the outcome). */
+export async function clearKakaoPending(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDb();
+  await db
+    .prepare(`UPDATE notifications SET kakao_pending = 0 WHERE id IN (${ids.map(() => "?").join(", ")})`)
+    .run(...ids);
 }
 
 export async function listNotificationsForUser(userId: string): Promise<AppNotification[]> {

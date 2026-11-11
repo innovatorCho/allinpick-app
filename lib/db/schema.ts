@@ -153,6 +153,23 @@ CREATE TABLE IF NOT EXISTS kakao_send_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_kakao_send_logs_created ON kakao_send_logs (created_at);
 
+-- Browser push subscriptions (lib/webPush.ts), one per browser/device a
+-- user turned alerts on in. endpoint is the push service URL the browser
+-- handed out and is unique per subscription; p256dh/auth are its encryption
+-- keys. last_sent_at feeds the batching window (lib/kakaoBatch.ts) for users
+-- who get alerts only by push.
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TEXT NOT NULL,
+  last_sent_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions (user_id);
+
 -- One row per (user, calendar day) — the "N개 상품 가격이 내려갔어요" daily
 -- digest Kakao message (lib/digestScheduler.ts), separate from kakao_send_logs
 -- because a digest isn't about one product (no single product_id to point

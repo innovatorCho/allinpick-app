@@ -14,6 +14,9 @@
  *    schedule settings (30 min by default, longer for stable products).
  * A cycle with nothing due is a single DB query.
  *
+ * After each poll it also sends queued Kakao price alerts (lib/kakaoBatch.ts),
+ * batched per user.
+ *
  * Admin settings (pause, concurrency) are re-read before every run, and the
  * worker reports its state to the DB every 30s (lib/domain/workerStatus.ts)
  * so the admin schedule page shows whether collection is running.
@@ -24,6 +27,7 @@ import { hostname } from "node:os";
 import { runOneCycle } from "@/lib/priceScheduler";
 import { listUncollectedTrackedProductIds, markDueNow } from "@/lib/domain/products";
 import { saveWorkerStatus, type WorkerStatus } from "@/lib/domain/workerStatus";
+import { flushKakaoBatches } from "@/lib/kakaoBatch";
 
 const POLL_INTERVAL_MS = 30_000;
 
@@ -103,6 +107,7 @@ async function main(): Promise<void> {
     const summary = await runOneCycle(undefined, { quietWhenIdle: true, reloadSettings: true });
     status.cycleStartedAt = null;
     if (summary) status.lastRun = summary;
+    await flushKakaoBatches();
     await reportStatus();
     if (!stopping) await sleep(POLL_INTERVAL_MS);
   }

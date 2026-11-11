@@ -8,6 +8,8 @@ import { listRecentKakaoDigestLogs } from "@/lib/domain/kakaoDigestLogs";
 import { formatDateTime, formatKrw } from "@/lib/format";
 import { NotificationTestForm } from "@/components/NotificationTestForm";
 import { KakaoTemplateForm } from "@/components/KakaoTemplateForm";
+import { KakaoBatchSettingsForm } from "@/components/KakaoBatchSettingsForm";
+import { getKakaoBatchSettings, SUMMARY_TEMPLATE_PLACEHOLDERS } from "@/lib/domain/kakaoBatchSettings";
 import type { NotificationType } from "@/lib/domain/types";
 
 const TYPE_LABEL: Record<string, string> = {
@@ -33,13 +35,14 @@ export default async function AdminNotificationsPage() {
     return <p className="text-sm text-zinc-500">관리자만 접근할 수 있습니다.</p>;
   }
 
-  const [notifications, users, products, kakaoTemplates, kakaoSendLogs, kakaoDigestLogs] = await Promise.all([
+  const [notifications, users, products, kakaoTemplates, kakaoSendLogs, kakaoDigestLogs, batch] = await Promise.all([
     listAllNotificationsForAdmin(),
     listAllUsers(),
     listAllProducts(),
     getAllKakaoTemplates(),
     listRecentKakaoSendLogs(),
     listRecentKakaoDigestLogs(),
+    getKakaoBatchSettings(),
   ]);
   const kakaoTypes: NotificationType[] = ["price_drop", "target_price"];
 
@@ -51,6 +54,31 @@ export default async function AdminNotificationsPage() {
           가격 하락·목표가 알림이 정상적으로 만들어지고 사용자 화면에 반영되는지 실제 가격 변동을 기다리지 않고
           확인할 수 있습니다.
         </p>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">카카오톡 알림 묶어 보내기</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            가격이 내려간 상품이 여러 개여도 카카오톡은 정해진 간격에 한 통만 보내요. 상품 1개면 아래 &quot;가격
+            하락&quot;·&quot;목표가 도달&quot; 템플릿으로, 2개 이상이면 요약 문구로 보내요. 웹의 알림 목록에는 상품마다
+            그대로 남아요.
+          </p>
+        </div>
+        <KakaoBatchSettingsForm
+          adminValues={{
+            windowMinutes: batch.sources.windowMinutes === "admin" ? String(batch.windowMinutes) : "",
+            summaryTitleTemplate: batch.sources.summaryTitleTemplate === "admin" ? batch.summaryTitleTemplate : "",
+            summaryTemplate: batch.sources.summaryTemplate === "admin" ? batch.summaryTemplate : "",
+          }}
+          effective={{
+            windowMinutes: batch.windowMinutes,
+            summaryTitleTemplate: batch.summaryTitleTemplate,
+            summaryTemplate: batch.summaryTemplate,
+          }}
+          sources={batch.sources}
+          placeholders={SUMMARY_TEMPLATE_PLACEHOLDERS}
+        />
       </div>
 
       <div className="flex flex-col gap-3">

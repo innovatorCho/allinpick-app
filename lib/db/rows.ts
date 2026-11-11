@@ -58,6 +58,8 @@ export interface NotificationRow {
   new_price: number | null;
   is_read: number;
   created_at: string;
+  kakao_pending: number;
+  target_price: number | null;
 }
 
 export interface UserRow {
@@ -124,4 +126,15 @@ export interface ErrorLogRow {
   resolved_at: string | null;
   resolved_by: string | null;
   resolution_note: string | null;
+}
+
+export interface PushSubscriptionRow {
+  id: number;
+  user_id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_agent: string | null;
+  created_at: string;
+  last_sent_at: string | null;
 }

@@ -72,3 +72,12 @@ export async function listRecentKakaoSendLogs(limit = 100): Promise<AdminKakaoSe
     createdAt: row.created_at,
   }));
 }
+
+/** When `userId` last actually received a Kakao alert — the batching window (lib/kakaoBatch.ts) counts from here. */
+export async function getLastKakaoSentAt(userId: string): Promise<string | null> {
+  const db = await getDb();
+  const row = (await db
+    .prepare(`SELECT MAX(created_at) AS last FROM kakao_send_logs WHERE user_id = ? AND status = 'sent'`)
+    .get(userId)) as { last: string | null } | undefined;
+  return row?.last ?? null;
+}

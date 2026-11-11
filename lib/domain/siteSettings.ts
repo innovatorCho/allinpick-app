@@ -21,7 +21,12 @@ export type SiteSettingKey =
   | "priceDisclaimer"
   | "footerNotice"
   | "pendingProductNotice"
-  | "pendingProductRetryNotice";
+  | "pendingProductRetryNotice"
+  | "kakaoChannelUrl"
+  | "kakaoChannelButtonLabel"
+  | "pushOptInNotice"
+  | "pushIosNotice"
+  | "pushWelcomeMessage";
 
 export interface SiteSettingField {
   key: SiteSettingKey;
@@ -33,7 +38,7 @@ export interface SiteSettingField {
   required: boolean;
   multiline: boolean;
   maxLength: number;
-  type?: "email";
+  type?: "email" | "url";
 }
 
 export const SITE_SETTING_FIELDS: SiteSettingField[] = [
@@ -129,6 +134,57 @@ export const SITE_SETTING_FIELDS: SiteSettingField[] = [
     multiline: true,
     maxLength: 300,
   },
+  {
+    key: "kakaoChannelUrl",
+    env: "SITE_KAKAO_CHANNEL_URL",
+    label: "카카오톡 채널 주소",
+    help: "채널 관리자센터의 채널 URL(예: http://pf.kakao.com/_xxxxx)이에요. 넣으면 하단과 내 관심상품 화면에 채널 추가 버튼이 보여요.",
+    defaultValue: null,
+    required: false,
+    multiline: false,
+    maxLength: 200,
+    type: "url",
+  },
+  {
+    key: "kakaoChannelButtonLabel",
+    env: "SITE_KAKAO_CHANNEL_BUTTON_LABEL",
+    label: "채널 추가 버튼 문구",
+    help: "카카오톡 채널 추가 버튼에 표시돼요.",
+    defaultValue: "카카오톡 채널 추가하고 소식 받기",
+    required: false,
+    multiline: false,
+    maxLength: 40,
+  },
+  {
+    key: "pushOptInNotice",
+    env: "SITE_PUSH_OPT_IN_NOTICE",
+    label: "기기 알림 안내",
+    help: "내 관심상품 화면의 '이 기기에서 알림 받기' 버튼 위에 표시돼요.",
+    defaultValue: "가격이 내려가면 이 기기로도 바로 알려드려요. 휴대폰과 PC에서 각각 켤 수 있어요.",
+    required: false,
+    multiline: true,
+    maxLength: 300,
+  },
+  {
+    key: "pushIosNotice",
+    env: "SITE_PUSH_IOS_NOTICE",
+    label: "아이폰 알림 안내",
+    help: "아이폰에서 홈 화면에 추가하지 않고 사이트를 열었을 때, 알림 버튼 대신 표시돼요.",
+    defaultValue: "아이폰은 Safari 아래쪽 공유 버튼 → '홈 화면에 추가'를 누른 뒤, 홈 화면에 생긴 아이콘으로 들어와서 알림을 켤 수 있어요.",
+    required: false,
+    multiline: true,
+    maxLength: 300,
+  },
+  {
+    key: "pushWelcomeMessage",
+    env: "SITE_PUSH_WELCOME_MESSAGE",
+    label: "기기 알림 켬 확인 메시지",
+    help: "사용자가 기기 알림을 켜는 순간 그 기기로 보내는 확인 알림 내용이에요. 제목은 서비스 이름이에요.",
+    defaultValue: "알림이 켜졌어요! 관심 상품 가격이 내려가면 이렇게 알려드릴게요 🔔",
+    required: false,
+    multiline: false,
+    maxLength: 100,
+  },
 ];
 
 export type SiteSettingSource = "admin" | "env" | "default" | "none";
@@ -205,6 +261,9 @@ export async function saveSiteSettings(input: Partial<Record<SiteSettingKey, str
     }
     if (value && field.type === "email" && !EMAIL_PATTERN.test(value)) {
       return { error: `${field.label} 형식이 올바르지 않아요.` };
+    }
+    if (value && field.type === "url" && !/^https?:\/\/\S+$/.test(value)) {
+      return { error: `${field.label}은(는) http:// 또는 https://로 시작하는 주소로 입력해주세요.` };
     }
     cleaned.push([field, value]);
   }

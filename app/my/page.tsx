@@ -7,6 +7,10 @@ import { listNotificationsForUser, countUnread } from "@/lib/domain/notification
 import { markNotificationReadAction, markAllNotificationsReadAction } from "@/lib/actions/notification-actions";
 import { ProductCard } from "@/components/ProductCard";
 import { SubmitButton } from "@/components/SubmitButton";
+import { PushSubscribeButton } from "@/components/PushSubscribeButton";
+import { KakaoChannelButton } from "@/components/KakaoChannelButton";
+import { getSiteSettings } from "@/lib/domain/siteSettings";
+import { getVapidPublicKey } from "@/lib/webPush";
 import { formatDateTime, formatKrw } from "@/lib/format";
 
 export default async function MyPage() {
@@ -22,6 +26,8 @@ export default async function MyPage() {
   );
   const notifications = await listNotificationsForUser(currentUser.id);
   const unreadCount = await countUnread(currentUser.id);
+  const site = await getSiteSettings();
+  const vapidPublicKey = getVapidPublicKey();
   const notificationProductNames = Object.fromEntries(
     await Promise.all(
       [...new Set(notifications.map((n) => n.productId))].map(
@@ -50,7 +56,8 @@ export default async function MyPage() {
         )}
       </section>
 
-      <section className="flex flex-col gap-3">
+      {/* Target of the "전체 보기" button in batched Kakao alerts (lib/kakaoBatch.ts). */}
+      <section id="notifications" className="flex scroll-mt-4 flex-col gap-3">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold">
             알림{unreadCount > 0 && <span className="ml-1 text-sm font-normal text-red-600">안 읽음 {unreadCount}건</span>}
@@ -66,6 +73,11 @@ export default async function MyPage() {
             </form>
           )}
         </div>
+
+        {vapidPublicKey && (
+          <PushSubscribeButton vapidPublicKey={vapidPublicKey} notice={site.pushOptInNotice} iosNotice={site.pushIosNotice} />
+        )}
+        <KakaoChannelButton url={site.kakaoChannelUrl} label={site.kakaoChannelButtonLabel} />
 
         {notifications.length === 0 ? (
           <p className="text-sm text-zinc-500">받은 알림이 없습니다.</p>

@@ -21,6 +21,7 @@ import {
 } from "@/lib/domain/errorLogs";
 import { saveSiteSettings, SITE_SETTING_FIELDS, type SiteSettingKey } from "@/lib/domain/siteSettings";
 import { endBotBlockWaitNow } from "@/lib/domain/botBlockCooldown";
+import { saveKakaoBatchSettings } from "@/lib/domain/kakaoBatchSettings";
 import type { NotificationType } from "@/lib/domain/types";
 
 /** Shared across every FormState-returning action below — a DB-connection
@@ -243,6 +244,33 @@ export async function updateKakaoTemplateAction(
   }
   revalidatePath("/admin/notifications");
   return { success: true };
+}
+
+export interface KakaoBatchFormState {
+  error?: string;
+  savedAt?: number;
+  /** Echoed back so a rejected save keeps what the admin typed (useActionState resets the form). */
+  values?: { windowMinutes: string; summaryTitleTemplate: string; summaryTemplate: string };
+}
+
+export async function saveKakaoBatchSettingsAction(
+  _prevState: KakaoBatchFormState | undefined,
+  formData: FormData
+): Promise<KakaoBatchFormState> {
+  await requireAdmin();
+  const values = {
+    windowMinutes: String(formData.get("windowMinutes") ?? ""),
+    summaryTitleTemplate: String(formData.get("summaryTitleTemplate") ?? ""),
+    summaryTemplate: String(formData.get("summaryTemplate") ?? ""),
+  };
+  try {
+    const result = await saveKakaoBatchSettings(values);
+    if (result.error) return { error: result.error, values };
+  } catch (err) {
+    return { error: dbErrorMessage(err) ?? "저장하지 못했습니다. 오류 로그를 확인해주세요.", values };
+  }
+  revalidatePath("/admin/notifications");
+  return { savedAt: Date.now(), values };
 }
 
 export async function resetKakaoTemplateAction(type: NotificationType): Promise<void> {

@@ -159,6 +159,15 @@ const COLUMN_MIGRATIONS: { table: string; column: string; ddl: string }[] = [
     column: "remember_me",
     ddl: "ALTER TABLE sessions ADD COLUMN remember_me INTEGER NOT NULL DEFAULT 0",
   },
+  // Kakao batching (lib/kakaoBatch.ts): 1 while the notification still waits
+  // for the user's next Kakao send. target_price is kept so a single queued
+  // "목표가 도달" can still render its template's {targetPrice} later.
+  {
+    table: "notifications",
+    column: "kakao_pending",
+    ddl: "ALTER TABLE notifications ADD COLUMN kakao_pending INTEGER NOT NULL DEFAULT 0",
+  },
+  { table: "notifications", column: "target_price", ddl: "ALTER TABLE notifications ADD COLUMN target_price INTEGER" },
 ];
 
 async function runMigrations(client: Client): Promise<void> {

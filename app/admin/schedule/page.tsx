@@ -20,6 +20,7 @@ function minutesAgo(iso: string): string {
 }
 
 /** Whether the collector worker (scripts/worker.ts) is running, and what its last run did. */
+function WorkerStatusPanel({ worker }: { worker: WorkerStatus | null }) {
   const online = isWorkerOnline(worker);
   const state = !worker
     ? { label: "기록 없음", className: "text-zinc-500" }

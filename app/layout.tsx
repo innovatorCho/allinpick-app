@@ -8,6 +8,7 @@ import { BrandMarkSvg } from "@/components/BrandMark";
 import { countUnread } from "@/lib/domain/notifications";
 import { countOpenErrors } from "@/lib/domain/errorLogs";
 import { getSiteSettings } from "@/lib/domain/siteSettings";
+import { KakaoChannelButton } from "@/components/KakaoChannelButton";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -79,6 +80,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
         <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-6">{children}</main>
         <footer className="border-t border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
           <div className="mx-auto flex max-w-4xl flex-col gap-2 break-keep px-4 py-6 text-xs leading-relaxed text-zinc-500">
+            <KakaoChannelButton url={site.kakaoChannelUrl} label={site.kakaoChannelButtonLabel} size="sm" />
             {site.priceDisclaimer && <p className="whitespace-pre-line">{site.priceDisclaimer}</p>}
             {site.footerNotice && <p className="whitespace-pre-line">{site.footerNotice}</p>}
             <div className="flex flex-wrap gap-x-4 gap-y-1">

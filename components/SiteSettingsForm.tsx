@@ -64,7 +64,7 @@ export function SiteSettingsForm({
               <input
                 id={field.key}
                 name={field.key}
-                type={field.type === "email" ? "email" : "text"}
+                type={field.type ?? "text"}
                 maxLength={field.maxLength}
                 defaultValue={state.values?.[field.key] ?? adminValues[field.key] ?? ""}
                 placeholder={fallback ?? ""}

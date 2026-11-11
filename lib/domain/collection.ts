@@ -216,6 +216,7 @@ async function notifyPriceDrop(productId: string, oldPrice: number, newPrice: nu
       oldPrice,
       newPrice,
       sendKakao: true,
+      batchKakao: true, // one summary instead of one message per product (lib/kakaoBatch.ts)
     });
     if (tracking.targetPrice != null && newPrice <= tracking.targetPrice) {
       await createNotification({
@@ -227,6 +228,7 @@ async function notifyPriceDrop(productId: string, oldPrice: number, newPrice: nu
         newPrice,
         targetPrice: tracking.targetPrice,
         sendKakao: true,
+        batchKakao: true,
       });
     }
   }

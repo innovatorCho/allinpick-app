@@ -5,6 +5,7 @@ import { recordKakaoSendLog } from "@/lib/domain/kakaoSendLogs";
 import { recordDigestLog } from "@/lib/domain/kakaoDigestLogs";
 import { refreshKakaoAccessToken, getBaseUrl } from "@/lib/auth/providers";
 import { runAfterResponse } from "@/lib/runAfterResponse";
+import { formatKrw } from "@/lib/format";
 import type { NotificationType } from "@/lib/domain/types";
 
 /**
@@ -130,57 +131,197 @@ export interface KakaoNotifyInput {
  * function's execution is kept alive until this actually finishes.
  */
 export function sendKakaoNotificationBestEffort(userId: string, input: KakaoNotifyInput): void {
-  // Logging itself must never be able to break (or mask the outcome of) the
-  // send it's recording — a DB write failure here is swallowed and only
-  // console-logged, same as every other failure mode in this file.
-  async function log(status: "sent" | "skipped" | "failed", detail?: string | null) {
-    try {
-      await recordKakaoSendLog({ userId, productId: input.productId, type: input.type, status, detail });
-    } catch (err) {
-      console.error(`[kakaoMessaging] 발송 로그 기록 실패:`, err instanceof Error ? err.message : err);
+  runAfterResponse(() => sendKakaoNotification(userId, input));
+}
+
+/**
+ * Logging itself must never be able to break (or mask the outcome of) the
+ * send it's recording — a DB write failure here is swallowed and only
+ * console-logged, same as every other failure mode in this file.
+ */
+async function logSend(
+  userId: string,
+  productId: string,
+  type: NotificationType,
+  status: "sent" | "skipped" | "failed",
+  detail?: string | null
+): Promise<void> {
+  try {
+    await recordKakaoSendLog({ userId, productId, type, status, detail });
+  } catch (err) {
+    console.error(`[kakaoMessaging] 발송 로그 기록 실패:`, err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * One product's alert text from the admin template for its type, plus what
+ * a message needs around it. Shared with browser push (lib/webPush.ts) so
+ * both channels say the same thing. Null when the product is gone.
+ */
+export async function renderNotificationContent(input: KakaoNotifyInput): Promise<{
+  objectType: KakaoObjectType;
+  text: string;
+  productName: string;
+  imageUrl: string | null;
+  productUrl: string;
+} | null> {
+  const product = await getProductById(input.productId);
+  if (!product) return null;
+  const productUrl = `${getBaseUrl()}/product/${input.productId}`;
+  const { objectType, template } = await getKakaoTemplate(input.type);
+  const text = renderKakaoTemplate(template, {
+    productName: product.name,
+    oldPrice: input.oldPrice ?? null,
+    newPrice: input.newPrice ?? null,
+    targetPrice: input.targetPrice ?? null,
+    productUrl,
+  });
+  return { objectType, text, productName: product.name, imageUrl: product.imageUrl, productUrl };
+}
+
+/**
+ * The single-product send itself, awaited. Never throws. Used directly by
+ * the batched sender (lib/kakaoBatch.ts), which runs in the collector
+ * worker with no request to attach `after()` to.
+ */
+export async function sendKakaoNotification(userId: string, input: KakaoNotifyInput): Promise<void> {
+  const log = (status: "sent" | "skipped" | "failed", detail?: string | null) =>
+    logSend(userId, input.productId, input.type, status, detail);
+  try {
+    const token = await getValidKakaoAccessToken(userId);
+    if (!token) {
+      await log("skipped", "연동된 카카오 계정이 없거나 talk_message 동의 토큰이 없음");
+      return;
     }
+
+    const content = await renderNotificationContent(input);
+    if (!content) {
+      // shouldn't happen (FK guarantees the row exists) — never let a lookup miss crash a best-effort send
+      await log("skipped", "상품 정보를 찾을 수 없음");
+      return;
+    }
+
+    const templateObject = buildKakaoTemplateObject(content.objectType, content);
+
+    await sendKakaoMemoToSelf(token, templateObject);
+    await log("sent");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[kakaoMessaging] user ${userId} 발송 실패:`, message);
+    await log("failed", message);
+  }
+}
+
+export interface KakaoSummaryItem {
+  productId: string;
+  type: NotificationType;
+}
+
+/**
+ * One Kakao message covering several products' alerts (lib/kakaoBatch.ts).
+ * The product that dropped the most is the card: its image, a headline and
+ * body from the admin templates, and Kakao's price table (item_content:
+ * previous / current / amount, with the drop rate as the bold total).
+ * Buttons open that product and the full notification list on the web.
+ * Falls back to a text message when the product has no image. Logged once
+ * per item, so the admin send history still lists every product. Never throws.
+ *
+ * item_content display limits (Kakao docs): item label 6 chars, item value
+ * 14 chars on one line, title_image_text 24 chars, category 14, sum 6,
+ * sum_op 11.
+ */
+export async function sendKakaoSummary(
+  userId: string,
+  input: {
+    items: KakaoSummaryItem[];
+    title: string;
+    description: string;
+    top: { productId: string; name: string; brand: string; imageUrl: string | null; oldPrice: number | null; newPrice: number | null };
+  }
+): Promise<void> {
+  const detail = `묶음 발송 (${input.items.length}건)`;
+  const logAll = async (status: "sent" | "skipped" | "failed", extra?: string) => {
+    for (const item of input.items) {
+      await logSend(userId, item.productId, item.type, status, extra ? `${detail} · ${extra}` : detail);
+    }
+  };
+  try {
+    const token = await getValidKakaoAccessToken(userId);
+    if (!token) {
+      await logAll("skipped", "연동된 카카오 계정이 없거나 talk_message 동의 토큰이 없음");
+      return;
+    }
+    await sendKakaoMemoToSelf(token, buildKakaoSummaryObject({ ...input, count: input.items.length }));
+    await logAll("sent");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[kakaoMessaging] user ${userId} 묶음 발송 실패:`, message);
+    await logAll("failed", message);
+  }
+}
+
+/**
+ * OliveYoung names often start with promo tags ("[1+1리필기획/아이돌광채세럼] 비긴스…")
+ * that would use up most of the price table's 24-character title.
+ */
+function withoutLeadingTags(name: string): string {
+  const stripped = name.replace(/^(\s*\[[^\]]*\])+\s*/, "");
+  return stripped || name;
+}
+
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+export function buildKakaoSummaryObject(input: {
+  count: number;
+  title: string;
+  description: string;
+  top: { productId: string; name: string; brand: string; imageUrl: string | null; oldPrice: number | null; newPrice: number | null };
+}): Record<string, unknown> {
+  const baseUrl = getBaseUrl();
+  const allUrl = `${baseUrl}/my#notifications`;
+  const allLink = { web_url: allUrl, mobile_web_url: allUrl };
+  const topUrl = `${baseUrl}/product/${input.top.productId}`;
+  const topLink = { web_url: topUrl, mobile_web_url: topUrl };
+  const { oldPrice, newPrice } = input.top;
+  const hasPrices = oldPrice != null && newPrice != null && oldPrice > 0;
+
+  if (!input.top.imageUrl) {
+    const priceLine = hasPrices
+      ? `\n\n${truncateProductName(input.top.name)}\n${formatKrw(oldPrice)} → ${formatKrw(newPrice)} (${Math.round(((oldPrice - newPrice) / oldPrice) * 100)}% ↓)`
+      : "";
+    return { object_type: "text", text: `${input.title}\n${input.description}${priceLine}`, link: allLink, button_title: "모두 보기" };
   }
 
-  runAfterResponse(async () => {
-    try {
-      const token = await getValidKakaoAccessToken(userId);
-      if (!token) {
-        await log("skipped", "연동된 카카오 계정이 없거나 talk_message 동의 토큰이 없음");
-        return;
-      }
-
-      const product = await getProductById(input.productId);
-      if (!product) {
-        // shouldn't happen (FK guarantees the row exists) — never let a lookup miss crash a best-effort send
-        await log("skipped", "상품 정보를 찾을 수 없음");
-        return;
-      }
-
-      const productUrl = `${getBaseUrl()}/product/${input.productId}`;
-      const { objectType, template } = await getKakaoTemplate(input.type);
-      const text = renderKakaoTemplate(template, {
-        productName: product.name,
-        oldPrice: input.oldPrice ?? null,
-        newPrice: input.newPrice ?? null,
-        targetPrice: input.targetPrice ?? null,
-        productUrl,
-      });
-
-      const templateObject = buildKakaoTemplateObject(objectType, {
-        text,
-        productName: product.name,
-        imageUrl: product.imageUrl,
-        productUrl,
-      });
-
-      await sendKakaoMemoToSelf(token, templateObject);
-      await log("sent");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error(`[kakaoMessaging] user ${userId} 발송 실패:`, message);
-      await log("failed", message);
-    }
-  });
+  return {
+    object_type: "feed",
+    content: {
+      title: input.title,
+      description: input.description,
+      image_url: input.top.imageUrl,
+      link: topLink,
+    },
+    ...(hasPrices
+      ? {
+          item_content: {
+            title_image_text: clip(withoutLeadingTags(input.top.name), 24),
+            title_image_category: clip(input.top.brand, 14),
+            items: [
+              { item: "이전 가격", item_op: formatKrw(oldPrice) },
+              { item: "현재 가격", item_op: formatKrw(newPrice) },
+              { item: "내린 금액", item_op: formatKrw(oldPrice - newPrice) },
+            ],
+            sum: "할인율",
+            sum_op: `${Math.round(((oldPrice - newPrice) / oldPrice) * 100)}% ↓`,
+          },
+        }
+      : {}),
+    buttons: [
+      { title: "이 상품 보기", link: topLink },
+      { title: `${input.count}개 모두 보기`, link: allLink },
+    ],
+  };
 }
 
 /**

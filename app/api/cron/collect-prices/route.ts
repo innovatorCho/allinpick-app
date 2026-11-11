@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { runOneCycle, getSchedulerStatus, CYCLE_START_CUTOFF_MARGIN_MS } from "@/lib/priceScheduler";
 import { isCronRequestAuthorized } from "@/lib/cronAuth";
 import { runLog, runWarn, seconds } from "@/lib/runLog";
+import { canCollectHere } from "@/lib/collectMode";
+import { flushKakaoBatches } from "@/lib/kakaoBatch";
 
 /**
  * Triggers one price-recollection cycle (lib/priceScheduler.ts's runOneCycle).
@@ -31,6 +33,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // Stop starting new products early enough that in-flight ones finish and
   // get saved before the platform kills the function.
   await runOneCycle(undefined, { stopStartingAt: Date.now() + maxDuration * 1000 - CYCLE_START_CUTOFF_MARGIN_MS });
+  if (canCollectHere()) await flushKakaoBatches(); // local dev: the worker does this in production
   const status = await getSchedulerStatus();
   runLog(`응답 보냄 · 총 ${seconds(Date.now() - received)}`, "collect-api");
   return NextResponse.json({
