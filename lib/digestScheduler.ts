@@ -64,11 +64,11 @@ export async function runDigestCheck(): Promise<void> {
     return;
   }
 
-  for (const { userId, count } of users) {
+  for (const { userId, count, singleProductId } of users) {
     if (count <= 0) continue;
     try {
       if (await hasSentDigestToday(userId, dateKey)) continue;
-      await sendKakaoDigest(userId, dateKey, count);
+      await sendKakaoDigest(userId, dateKey, count, singleProductId);
     } catch (err) {
       // One user's failure (DB hiccup checking/recording, or the send itself
       // throwing past sendKakaoDigest's own try/catch somehow) must never

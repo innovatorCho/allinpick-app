@@ -15,6 +15,8 @@ import {
 
 export interface RegisterFormState {
   error?: string;
+  /** The form offers a login button with the error. */
+  needsLogin?: boolean;
 }
 
 /**
@@ -27,14 +29,16 @@ export async function registerProductAction(
   _prevState: RegisterFormState | undefined,
   formData: FormData
 ): Promise<RegisterFormState> {
-  const url = String(formData.get("url") ?? "").trim();
+  const raw = String(formData.get("url") ?? "").trim();
+  // OliveYoung's share sheet copies the link with the product name around it.
+  const url = raw.match(/https?:\/\/\S+/i)?.[0] ?? raw;
   if (!url) {
     return { error: "올리브영 상품 URL을 입력해주세요." };
   }
 
   const user = await getCurrentUser();
   if (!user) {
-    return { error: "로그인이 필요합니다." };
+    return { error: "가격 알림을 받으려면 로그인이 필요해요.\n카카오나 구글 계정으로 간편하게 로그인할 수 있어요.", needsLogin: true };
   }
 
   let productId: string;

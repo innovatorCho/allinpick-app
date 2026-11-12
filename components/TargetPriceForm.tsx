@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { setTargetPriceAction, type TargetPriceFormState } from "@/lib/actions/tracking-actions";
+import { ActionErrorModal } from "./MessageModal";
 
 const initialState: TargetPriceFormState = {};
 
@@ -34,7 +35,7 @@ export function TargetPriceForm({
           알림 설정
         </button>
       </div>
-      {state.error && <p className="text-xs text-red-600">{state.error}</p>}
+      <ActionErrorModal state={state} />
       {state.success && <p className="text-xs text-emerald-600">목표 가격이 설정되었습니다.</p>}
     </form>
   );

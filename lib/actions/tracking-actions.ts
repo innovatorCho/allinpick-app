@@ -7,6 +7,8 @@ import { setTargetPriceForUser } from "@/lib/domain/collection";
 
 export interface TargetPriceFormState {
   error?: string;
+  /** The form offers a login button with the error. */
+  needsLogin?: boolean;
   success?: boolean;
 }
 
@@ -42,7 +44,7 @@ export async function setTargetPriceAction(
   try {
     userId = (await requireUser()).id;
   } catch {
-    return { error: "로그인이 필요합니다." };
+    return { error: "로그인이 만료됐어요. 다시 로그인한 뒤 목표 가격을 설정해주세요.", needsLogin: true };
   }
 
   setTargetPriceForUser(userId, productId, targetPrice);

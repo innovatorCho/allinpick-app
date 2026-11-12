@@ -134,7 +134,10 @@ export async function listNotificationsForUser(userId: string): Promise<AppNotif
 
 export interface UserPriceDropCount {
   userId: string;
+  /** Distinct products that dropped, so one product dropping twice counts once. */
   count: number;
+  /** The product, when only one dropped — the digest then links straight to it. */
+  singleProductId: string | null;
 }
 
 /**
@@ -149,12 +152,16 @@ export async function listUsersWithPriceDropCountToday(sinceIso: string): Promis
   const db = await getDb();
   const rows = (await db
     .prepare(
-      `SELECT user_id, COUNT(*) AS cnt FROM notifications
+      `SELECT user_id, COUNT(DISTINCT product_id) AS cnt, MIN(product_id) AS first_product FROM notifications
        WHERE type = 'price_drop' AND created_at >= ?
        GROUP BY user_id`
     )
-    .all(sinceIso)) as unknown as { user_id: string; cnt: number }[];
-  return rows.map((row) => ({ userId: row.user_id, count: row.cnt }));
+    .all(sinceIso)) as unknown as { user_id: string; cnt: number; first_product: string }[];
+  return rows.map((row) => ({
+    userId: row.user_id,
+    count: row.cnt,
+    singleProductId: row.cnt === 1 ? row.first_product : null,
+  }));
 }
 
 export async function countUnread(userId: string): Promise<number> {

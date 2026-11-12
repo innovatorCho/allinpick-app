@@ -71,8 +71,17 @@ export default async function AdminProductDetailPage({ params }: PageProps<"/adm
         )}
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div id="curator" className="flex scroll-mt-4 flex-col gap-2">
         <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">큐레이터 URL 관리</h2>
+        {product.curatorUrl ? (
+          <p className="break-all rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300">
+            ✓ 등록됨 · 구매하기 버튼이 이 링크로 이동해요: {product.curatorUrl}
+          </p>
+        ) : (
+          <p className="break-keep rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+            ⚠ 미등록 · 구매하기 버튼이 올리브영 원본 상품 페이지로 이동해요.
+          </p>
+        )}
         <CuratorUrlForm productId={product.id} currentUrl={product.curatorUrl} />
       </div>
 

@@ -140,6 +140,15 @@ async function main() {
     const userA = counts.find((c) => c.userId === "user-a");
     assert.ok(userA, "user-a는 집계에 포함되어야 함");
     assert.equal(userA!.count, 2, "price_drop 2건만 세어야 함 (target_price 제외)");
+    assert.equal(userA!.singleProductId, null, "상품이 2개면 특정 상품을 가리키지 않음");
+
+    // 같은 상품이 하루에 두 번 내려가도 1개 상품으로 셈 → 그 상품으로 바로 연결.
+    for (const newPrice of [8000, 7000]) {
+      await createNotification({ userId: "user-c", productId: productB, type: "price_drop", message: "하락", oldPrice: 9000, newPrice });
+    }
+    const userC = (await listUsersWithPriceDropCountToday(sinceIso)).find((c) => c.userId === "user-c");
+    assert.equal(userC!.count, 1);
+    assert.equal(userC!.singleProductId, productB);
   });
 
   await test("kakaoDigestLogs: 기록 전엔 false, 'sent' 기록 후엔 true, (user,date) upsert로 중복행이 안 생김", async () => {
@@ -216,6 +225,30 @@ async function main() {
       assert.equal(log.status, "sent");
       assert.equal(log.dropCount, 4);
       assert.equal(log.digestDate, "2026-03-03");
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  await test("sendKakaoDigest: 오늘 내린 상품이 1개면 그 상품 상세 화면으로 연결됨", async () => {
+    const user = await createOAuthUser({
+      provider: "kakao",
+      providerUserId: "kt-digest-single",
+      email: null,
+      name: "다이제스트단일",
+      isAdmin: false,
+      tokens: { accessToken: "digest-single-token", refreshToken: null, expiresAt: new Date(Date.now() + 3_600_000).toISOString() },
+    });
+    const state: { captured: { link: { web_url: string }; button_title: string } | null } = { captured: null };
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      state.captured = JSON.parse(new URLSearchParams(String(init?.body)).get("template_object") ?? "{}");
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      await sendKakaoDigest(user.id, "2026-03-04", 1, "DIGEST002");
+      assert.ok(state.captured);
+      assert.ok(state.captured.link.web_url.endsWith("/product/DIGEST002"));
+      assert.equal(state.captured.button_title, "상품 보기");
     } finally {
       restoreFetch();
     }

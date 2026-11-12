@@ -26,7 +26,8 @@ export type SiteSettingKey =
   | "kakaoChannelButtonLabel"
   | "pushOptInNotice"
   | "pushIosNotice"
-  | "pushWelcomeMessage";
+  | "pushWelcomeMessage"
+  | "homeEntryHelp";
 
 export interface SiteSettingField {
   key: SiteSettingKey;
@@ -184,6 +185,17 @@ export const SITE_SETTING_FIELDS: SiteSettingField[] = [
     required: false,
     multiline: false,
     maxLength: 100,
+  },
+  {
+    key: "homeEntryHelp",
+    env: "SITE_HOME_ENTRY_HELP",
+    label: "홈 입력창 안내",
+    help: "홈 화면 입력창(링크 붙여넣기 / 상품 검색) 아래에 표시돼요.",
+    defaultValue:
+      "올리브영 앱·웹에서 상품의 공유 → 링크 복사 후 붙여넣으면 가격이 내려갈 때 알려드려요.\n상품 이름을 입력하면 이미 등록된 상품에서 찾아드려요.",
+    required: false,
+    multiline: true,
+    maxLength: 300,
   },
 ];
 

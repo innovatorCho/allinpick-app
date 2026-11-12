@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { subscribePushAction, unsubscribePushAction } from "@/lib/actions/push-actions";
+import { MessageModal } from "./MessageModal";
 
 type State = "checking" | "unsupported" | "ios-install" | "denied" | "off" | "on";
 
@@ -140,7 +141,7 @@ export function PushSubscribeButton({
               </button>
             )}
           </div>
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          <MessageModal open={error != null} message={error ?? ""} onClose={() => setError(null)} />
         </>
       )}
     </div>

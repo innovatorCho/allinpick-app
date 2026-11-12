@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { registerProductAction, type RegisterFormState } from "@/lib/actions/product-actions";
+import { ActionErrorModal } from "./MessageModal";
 
 const initialState: RegisterFormState = {};
 
@@ -27,7 +28,7 @@ export function RegisterProductForm({ defaultUrl }: { defaultUrl?: string } = {}
           {pending ? "확인 중..." : "가격 알림 받기"}
         </button>
       </div>
-      {state.error && <p className="text-sm text-red-600">{state.error}</p>}
+      <ActionErrorModal state={state} />
     </form>
   );
 }

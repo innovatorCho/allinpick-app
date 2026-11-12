@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { RegisterProductForm } from "@/components/RegisterProductForm";
+import { ProductEntryForm } from "@/components/ProductEntryForm";
+import { getSiteSettings } from "@/lib/domain/siteSettings";
 import { ProductCard } from "@/components/ProductCard";
 import { BrandMarkSvg } from "@/components/BrandMark";
 import { listPopularProducts, getProductById } from "@/lib/domain/products";
@@ -9,6 +10,7 @@ import { getCurrentUser } from "@/lib/session";
 export default async function HomePage() {
   const currentUser = await getCurrentUser();
   const popular = await listPopularProducts(5);
+  const site = await getSiteSettings();
   const tracking = currentUser
     ? (await Promise.all((await listTrackingForUser(currentUser.id)).map((t) => getProductById(t.productId)))).filter(
         (p): p is NonNullable<typeof p> => p != null
@@ -27,21 +29,7 @@ export default async function HomePage() {
             <p className="text-sm text-zinc-500">관심 상품을 등록하면 가격이 내려갈 때 알려드려요</p>
           </div>
         </div>
-        <RegisterProductForm />
-        <form action="/search" method="GET" className="flex gap-2">
-          <input
-            type="text"
-            name="q"
-            placeholder="상품명, 브랜드로 검색"
-            className="flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          <button
-            type="submit"
-            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800"
-          >
-            검색
-          </button>
-        </form>
+        <ProductEntryForm help={site.homeEntryHelp} />
       </section>
 
       <section className="flex flex-col gap-3">

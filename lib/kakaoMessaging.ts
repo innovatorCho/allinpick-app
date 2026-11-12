@@ -334,7 +334,13 @@ export function buildKakaoSummaryObject(input: {
  * instead of racing a second tick's idempotency check against an
  * in-flight send.
  */
-export async function sendKakaoDigest(userId: string, digestDate: string, dropCount: number): Promise<void> {
+export async function sendKakaoDigest(
+  userId: string,
+  digestDate: string,
+  dropCount: number,
+  /** Set when only one product dropped: the message then opens that product instead of the list. */
+  singleProductId: string | null = null
+): Promise<void> {
   try {
     const token = await getValidKakaoAccessToken(userId);
     if (!token) {
@@ -345,12 +351,12 @@ export async function sendKakaoDigest(userId: string, digestDate: string, dropCo
     // Built directly (not via buildKakaoTemplateObject) — that helper is
     // shaped around one product's name/image/link, none of which a digest
     // covering several products at once actually has.
-    const myProductsUrl = `${getBaseUrl()}/my`;
+    const url = singleProductId ? `${getBaseUrl()}/product/${singleProductId}` : `${getBaseUrl()}/my`;
     const templateObject = {
       object_type: "text",
       text: `📉 오늘 ${dropCount}개 상품의 가격이 내려갔어요!\n지금 확인해보세요 👇`,
-      link: { web_url: myProductsUrl, mobile_web_url: myProductsUrl },
-      button_title: "내 추적 상품 보기",
+      link: { web_url: url, mobile_web_url: url },
+      button_title: singleProductId ? "상품 보기" : "내 추적 상품 보기",
     };
 
     await sendKakaoMemoToSelf(token, templateObject);
