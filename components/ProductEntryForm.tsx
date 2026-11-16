@@ -4,6 +4,7 @@ import { useActionState, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { registerProductAction, type RegisterFormState } from "@/lib/actions/product-actions";
 import { ActionErrorModal } from "./MessageModal";
+import { CollectingNotice } from "./CollectingNotice";
 
 // OliveYoung's share sheet copies "[올리브영] 상품명 https://oy.run/..." — a link anywhere in the text counts.
 const LINK_IN_TEXT = /https?:\/\/\S+|oliveyoung\.co\.kr|oy\.run/i;
@@ -15,7 +16,7 @@ const initialState: RegisterFormState = {};
  * for price alerts, anything else searches the products already registered.
  * The button says which of the two will happen.
  */
-export function ProductEntryForm({ help }: { help: string | null }) {
+export function ProductEntryForm({ help, registeringNotice }: { help: string | null; registeringNotice: string | null }) {
   const router = useRouter();
   const [value, setValue] = useState("");
   const [state, action, pending] = useActionState(registerProductAction, initialState);
@@ -54,8 +55,9 @@ export function ProductEntryForm({ help }: { help: string | null }) {
           {pending ? "등록 중..." : isLink || isEmpty ? "🔔 알림 받기" : "🔍 검색"}
         </button>
       </div>
+      {pending && registeringNotice && <CollectingNotice message={registeringNotice} />}
       <ActionErrorModal state={state} />
-      {help && <p className="whitespace-pre-line break-keep text-xs leading-relaxed text-zinc-500">{help}</p>}
+      {!pending && help && <p className="whitespace-pre-line break-keep text-xs leading-relaxed text-zinc-500">{help}</p>}
     </form>
   );
 }

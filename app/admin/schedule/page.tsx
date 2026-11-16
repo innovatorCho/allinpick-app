@@ -1,8 +1,8 @@
 import { getCurrentUser } from "@/lib/session";
 import { getSchedulerStatus, MIN_INTERVAL_MS, MAX_CONCURRENCY, MAX_PRODUCTS_PER_TICK } from "@/lib/priceScheduler";
-import { loadSchedulerSettings } from "@/lib/domain/schedulerSettings";
+import { loadSchedulerSettings, MAX_REQUEST_GAP_SEC } from "@/lib/domain/schedulerSettings";
 import { listDueTrackedProducts } from "@/lib/domain/products";
-import { getWorkerStatus, isWorkerOnline, type WorkerStatus } from "@/lib/domain/workerStatus";
+import { getWorkerStatus, isWorkerOnline, type CycleProgress, type WorkerStatus } from "@/lib/domain/workerStatus";
 import { canCollectHere } from "@/lib/collectMode";
 import { cooldownPhase, getBotBlockCooldown, BOT_BLOCK_WAIT_STEPS_MIN, type BotBlockCooldown } from "@/lib/domain/botBlockCooldown";
 import { formatDateTime } from "@/lib/format";
@@ -10,6 +10,7 @@ import { collectStatusLabel } from "@/lib/collectStatusLabels";
 import { toggleSchedulerAction, runSchedulerNowAction, endBotBlockWaitAction } from "@/lib/actions/admin-actions";
 import { SchedulerConfigForm } from "@/components/SchedulerConfigForm";
 import { SubmitButton } from "@/components/SubmitButton";
+import { AutoRefresh } from "@/components/AutoRefresh";
 
 function minutesAgo(iso: string): string {
   const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000);
@@ -17,6 +18,90 @@ function minutesAgo(iso: string): string {
   if (minutes < 60) return `${minutes}분 전`;
   const hours = Math.floor(minutes / 60);
   return hours < 24 ? `${hours}시간 전` : `${Math.floor(hours / 24)}일 전`;
+}
+
+function elapsed(iso: string): string {
+  const totalSeconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  return minutes > 0 ? `${minutes}분 ${totalSeconds % 60}초` : `${totalSeconds}초`;
+}
+
+type CollectionState =
+  | { kind: "collecting"; progress: CycleProgress }
+  | { kind: "offline" }
+  | { kind: "paused" }
+  | { kind: "blocked"; until: string }
+  | { kind: "idle"; due: number };
+
+/**
+ * One glance answer to "is collection running right now?", with a progress
+ * bar during a run. The page refreshes itself (fast while collecting), so
+ * the bar moves without reloading.
+ */
+function CollectionStatePanel({ state }: { state: CollectionState }) {
+  if (state.kind === "collecting") {
+    const { progress } = state;
+    const percent = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border-2 border-sky-300 bg-sky-50 p-4 text-sm text-sky-900 dark:border-sky-700 dark:bg-sky-950 dark:text-sky-100">
+        <div className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-sky-200 border-t-sky-600 dark:border-sky-800 dark:border-t-sky-300"
+          />
+          <p className="font-semibold">
+            {progress.probing ? "차단이 풀렸는지 상품 1개로 확인하는 중" : "가격 수집 중"} · {progress.done}/{progress.total}개 ({percent}%)
+          </p>
+        </div>
+        <div
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={progress.total}
+          aria-valuenow={progress.done}
+          className="h-3 w-full overflow-hidden rounded-full bg-sky-100 dark:bg-sky-900"
+        >
+          <div
+            className={`h-full rounded-full bg-sky-500 transition-[width] duration-700 ${progress.done === 0 ? "animate-pulse" : ""}`}
+            // An empty bar reads as "stuck"; a sliver shows the run has started.
+            style={{ width: `${Math.max(percent, 3)}%` }}
+          />
+        </div>
+        <p className="text-xs">
+          성공 <span className="font-medium text-emerald-700 dark:text-emerald-400">{progress.succeeded}</span> · 실패{" "}
+          <span className={progress.failed > 0 ? "font-medium text-amber-700 dark:text-amber-400" : undefined}>{progress.failed}</span> ·
+          경과 {elapsed(progress.startedAt)} · 상품 1개에 보통 5~10초 걸려요
+        </p>
+      </div>
+    );
+  }
+
+  const idle = {
+    offline: { dot: "bg-red-500", title: "수집 멈춤 · 수집 프로그램이 꺼져 있어요", detail: "아래 안내대로 수집 프로그램을 실행해주세요." },
+    paused: { dot: "bg-zinc-400", title: "수집 멈춤 · 일시정지 상태예요", detail: "아래 '재개'를 누르면 다시 수집합니다." },
+    blocked: {
+      dot: "bg-amber-500",
+      title: "수집 멈춤 · 올리브영 차단으로 기다리는 중",
+      detail: state.kind === "blocked" ? `${formatDateTime(state.until)}에 상품 1개로 다시 확인합니다.` : "",
+    },
+    idle: {
+      dot: "bg-emerald-500",
+      title: "대기 중 · 지금은 수집하고 있지 않아요",
+      detail:
+        state.kind === "idle" && state.due > 0
+          ? `확인할 상품 ${state.due}개가 있어 30초 안에 수집을 시작합니다.`
+          : "확인할 때가 된 상품이 생기면 자동으로 수집을 시작합니다 (30초마다 확인).",
+    },
+  }[state.kind];
+
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-zinc-200 p-4 text-sm dark:border-zinc-800">
+      <span aria-hidden className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${idle.dot}`} />
+      <div className="flex flex-col gap-0.5">
+        <p className="font-semibold">{idle.title}</p>
+        <p className="text-xs text-zinc-500">{idle.detail}</p>
+      </div>
+    </div>
+  );
 }
 
 /** Whether the collector worker (scripts/worker.ts) is running, and what its last run did. */
@@ -69,7 +154,7 @@ function WorkerStatusPanel({ worker }: { worker: WorkerStatus | null }) {
       )}
       {run && run.botBlocked > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          마지막 수집에서 올리브영 차단이 있었습니다. 자주 반복되면 동시 처리 개수를 1로 낮추거나 주기를 늘려주세요.
+          마지막 수집에서 올리브영 차단이 있었습니다. 자주 반복되면 상품 사이 요청 간격이나 주기를 늘려주세요.
         </p>
       )}
     </div>
@@ -122,6 +207,17 @@ export default async function AdminSchedulePage() {
     getBotBlockCooldown(),
   ]);
   const currentlyDueCount = due.length;
+  const online = isWorkerOnline(worker);
+  const progress = (collectsHere ? status.progress : null) ?? (online ? (worker?.progress ?? null) : null);
+  const collectionState: CollectionState = progress
+    ? { kind: "collecting", progress }
+    : !collectsHere && !online
+      ? { kind: "offline" }
+      : !settings.enabled
+        ? { kind: "paused" }
+        : cooldown && cooldownPhase(cooldown) === "waiting"
+          ? { kind: "blocked", until: cooldown.until }
+          : { kind: "idle", due: currentlyDueCount };
   const statusLabel = !settings.enabled ? "일시정지" : collectsHere && status.cycleInProgress ? "실행 중" : "켜짐";
 
   return (
@@ -137,6 +233,13 @@ export default async function AdminSchedulePage() {
         </p>
       </div>
 
+      {/* Every 3s while collecting so the bar moves; every 15s otherwise to notice a run starting. */}
+      <AutoRefresh
+        key={progress ? "collecting" : "idle"}
+        intervalMs={progress ? 3_000 : 15_000}
+        stopAfterMs={2 * 60 * 60_000}
+      />
+      <CollectionStatePanel state={collectionState} />
       <WorkerStatusPanel worker={worker} />
       {cooldown && <BotBlockPanel cooldown={cooldown} />}
 
@@ -154,7 +257,18 @@ export default async function AdminSchedulePage() {
             </span>
           </span>
           <span>주기: {Math.round(settings.intervalMs / 60000)}분</span>
-          <span>동시 처리: {settings.concurrency}개</span>
+          <span>
+            동시 처리:{" "}
+            {settings.pacing.requestGapMaxSec > 0
+              ? `1개 (상품 사이 ${settings.pacing.requestGapMinSec}~${settings.pacing.requestGapMaxSec}초 쉼)`
+              : `${settings.concurrency}개`}
+          </span>
+          <span>
+            쉬는 시간:{" "}
+            {settings.pacing.quietStartHour === settings.pacing.quietEndHour
+              ? "없음"
+              : `${settings.pacing.quietStartHour}시~${settings.pacing.quietEndHour}시 (새 상품만 수집)`}
+          </span>
           {collectsHere && <span>마지막 실행 시작: {formatDateTime(status.lastRunStartedAt)}</span>}
           {collectsHere && status.lastRunDurationMs != null && (
             <span>마지막 소요 시간: {(status.lastRunDurationMs / 1000).toFixed(1)}초</span>
@@ -192,9 +306,6 @@ export default async function AdminSchedulePage() {
           </form>
         )}
       </div>
-      {collectsHere && status.cycleInProgress && (
-        <p className="text-xs text-zinc-500">실행 중입니다. 새로고침하면 진행 상황이 갱신됩니다.</p>
-      )}
 
       <div className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">설정 변경</h2>
@@ -203,6 +314,8 @@ export default async function AdminSchedulePage() {
           currentConcurrency={settings.concurrency}
           minIntervalMinutes={MIN_INTERVAL_MS / 60000}
           maxConcurrency={MAX_CONCURRENCY}
+          pacing={settings.pacing}
+          maxGapSeconds={MAX_REQUEST_GAP_SEC}
         />
       </div>
 

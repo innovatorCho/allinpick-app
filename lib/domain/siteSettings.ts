@@ -27,7 +27,8 @@ export type SiteSettingKey =
   | "pushOptInNotice"
   | "pushIosNotice"
   | "pushWelcomeMessage"
-  | "homeEntryHelp";
+  | "homeEntryHelp"
+  | "registeringNotice";
 
 export interface SiteSettingField {
   key: SiteSettingKey;
@@ -196,6 +197,16 @@ export const SITE_SETTING_FIELDS: SiteSettingField[] = [
     required: false,
     multiline: true,
     maxLength: 300,
+  },
+  {
+    key: "registeringNotice",
+    env: "SITE_REGISTERING_NOTICE",
+    label: "상품 등록 중 안내",
+    help: "상품 링크로 알림 받기를 누른 뒤, 등록이 끝날 때까지 입력창 아래에 크게 표시돼요.",
+    defaultValue: "올리브영에서 상품 정보를 가져오고 있어요.\n최대 10초 정도 걸릴 수 있으니 이 화면에서 잠시만 기다려주세요.",
+    required: false,
+    multiline: true,
+    maxLength: 200,
   },
 ];
 

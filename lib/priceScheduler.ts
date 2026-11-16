@@ -13,8 +13,16 @@ import {
   type BotBlockCooldown,
 } from "@/lib/domain/botBlockCooldown";
 import {
+  isQuietHour,
   loadSchedulerSettings,
   persistConcurrency,
+  persistPacing,
+  validatePacing,
+  DEFAULT_QUIET_END_HOUR,
+  DEFAULT_QUIET_START_HOUR,
+  DEFAULT_REQUEST_GAP_MAX_SEC,
+  DEFAULT_REQUEST_GAP_MIN_SEC,
+  type PacingSettings,
   persistEnabled,
   persistIntervalMs,
   DEFAULT_CONCURRENCY,
@@ -24,7 +32,7 @@ import {
 import { DbConnectionError, DbConfigError } from "@/lib/db/client";
 import { runAfterResponse } from "@/lib/runAfterResponse";
 import type { CollectStatus, PriceChangeType, Product } from "@/lib/domain/types";
-import type { CycleSummary } from "@/lib/domain/workerStatus";
+import { getWorkerStatus, isWorkerOnline, type CycleProgress, type CycleSummary } from "@/lib/domain/workerStatus";
 
 export { MIN_INTERVAL_MS, MAX_CONCURRENCY, DEFAULT_CONCURRENCY };
 
@@ -101,6 +109,8 @@ export interface SchedulerStatus {
   lastRunFinishedAt: string | null;
   lastRunDurationMs: number | null;
   lastRunResults: SchedulerRunResult[];
+  /** Live counts while a run is collecting, null otherwise. */
+  progress: CycleProgress | null;
 }
 
 declare global {
@@ -117,6 +127,8 @@ interface SchedulerState {
   lastRunFinishedAt: string | null;
   lastRunDurationMs: number | null;
   lastRunResults: SchedulerRunResult[];
+  progress: CycleProgress | null;
+  pacing: PacingSettings;
 }
 
 function getState(): SchedulerState {
@@ -131,6 +143,13 @@ function getState(): SchedulerState {
       lastRunFinishedAt: null,
       lastRunDurationMs: null,
       lastRunResults: [],
+      progress: null,
+      pacing: {
+        requestGapMinSec: DEFAULT_REQUEST_GAP_MIN_SEC,
+        requestGapMaxSec: DEFAULT_REQUEST_GAP_MAX_SEC,
+        quietStartHour: DEFAULT_QUIET_START_HOUR,
+        quietEndHour: DEFAULT_QUIET_END_HOUR,
+      },
     };
   }
   return globalThis.__allinpickSchedulerState;
@@ -152,6 +171,7 @@ async function ensureSettingsLoaded(): Promise<SchedulerState> {
     state.intervalMs = settings.intervalMs;
     state.enabled = settings.enabled;
     state.concurrency = settings.concurrency;
+    state.pacing = settings.pacing;
   } catch (err) {
     // DB unreachable — don't crash the caller over it; keep the in-memory
     // defaults already in `state` and let the next call retry (not marking
@@ -179,14 +199,23 @@ async function mapWithConcurrency<T, R>(
   items: T[],
   limit: number,
   fn: (item: T) => Promise<R>,
-  options?: { onResult?: (result: R, item: T) => void; shouldAbort?: () => boolean }
+  options?: {
+    onResult?: (result: R, item: T) => void;
+    shouldAbort?: () => boolean;
+    /** Pause before each item after a worker's first, in ms. */
+    gapMs?: () => number;
+  }
 ): Promise<(R | undefined)[]> {
   const results: (R | undefined)[] = new Array(items.length);
   let nextIndex = 0;
 
   async function worker(): Promise<void> {
-    for (;;) {
+    for (let started = 0; ; started += 1) {
       if (options?.shouldAbort?.()) return;
+      if (started > 0 && options?.gapMs && nextIndex < items.length) {
+        await new Promise((resolve) => setTimeout(resolve, options.gapMs!()));
+        if (options.shouldAbort?.()) return;
+      }
       const current = nextIndex;
       nextIndex += 1;
       if (current >= items.length) return;
@@ -294,6 +323,19 @@ export interface RunCycleOptions {
    * only take effect after restarting it.
    */
   reloadSettings?: boolean;
+  /**
+   * Called when a run with products to collect starts and after each
+   * product, so the worker can report live progress to the admin page.
+   */
+  onProgress?: (progress: CycleProgress) => void;
+  /**
+   * Set by the collector worker (scripts/worker.ts). It applies the admin
+   * pacing (one product at a time with random pauses, quiet hours). Any
+   * other caller (a local `next dev`'s self-ping, the admin button) stands
+   * down while the worker is online, so OliveYoung never gets requests from
+   * two places at once: that doubled requests and bursts and got us blocked.
+   */
+  asWorker?: boolean;
 }
 
 /** Returns what this run did, or null when it didn't collect anything (paused, skipped, nothing due). */
@@ -316,6 +358,18 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
     if (!options.quietWhenIdle) runLog("건너뜀: 스케줄러가 일시정지 상태입니다.");
     return null;
   }
+  if (!options.asWorker) {
+    let workerOnline: boolean;
+    try {
+      workerOnline = isWorkerOnline(await getWorkerStatus());
+    } catch {
+      workerOnline = true; // can't tell: don't risk collecting alongside it
+    }
+    if (workerOnline) {
+      if (!options.quietWhenIdle) runLog("건너뜀: 수집 프로그램(npm run worker)이 실행 중이라 이 서버에서는 수집하지 않습니다.");
+      return null;
+    }
+  }
   const stale =
     state.cycleInProgress &&
     state.lastRunStartedAt != null &&
@@ -327,11 +381,16 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
     return null;
   }
 
-  let cooldown: BotBlockCooldown | null = null;
+  let cooldown: BotBlockCooldown | null;
   try {
     cooldown = await getBotBlockCooldown();
-  } catch {
-    // DB hiccup: the target query below fails the same way and is handled there.
+  } catch (err) {
+    // Not knowing whether a block pause is on must not count as "no pause":
+    // that once sent a full run of requests into an active block (instead of
+    // the single probe) and pushed the wait to the next, longer step. The
+    // listing query below often succeeds right after such a blip.
+    runWarn(`건너뜀: 차단 대기 상태를 확인하지 못했습니다. 다음 확인 때 다시 시도합니다. (${err instanceof Error ? err.message.split("\n")[0] : String(err)})`);
+    return null;
   }
   const phase = cooldownPhase(cooldown);
   if (phase === "waiting") {
@@ -348,7 +407,10 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
   try {
     // After a block's wait: one product only, to see whether it has lifted.
     const probing = phase === "probing";
-    const targets = await listDueTrackedProducts(startedAt.toISOString(), probing ? 1 : MAX_PRODUCTS_PER_TICK);
+    const pacing = options.asWorker ? state.pacing : null;
+    const quiet = pacing != null && isQuietHour(pacing, startedAt);
+    const targets = await listDueTrackedProducts(startedAt.toISOString(), probing ? 1 : MAX_PRODUCTS_PER_TICK, quiet);
+    const spaced = pacing != null && pacing.requestGapMaxSec > 0;
     if (targets.length === 0 && options.quietWhenIdle) return null;
     if (probing) runLog(`차단 대기가 끝났습니다 (${cooldown!.level}단계). 상품 1개로 차단이 풀렸는지 확인합니다.`);
     const cutoffNote =
@@ -359,8 +421,17 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
     // createServerlessRenderSession), so a second worker would only sit in
     // the browser's queue while its log line already says "started", and the
     // start cutoff would be checked too early for it.
-    const concurrency = process.env.VERCEL ? 1 : state.concurrency;
-    const concurrencyNote = concurrency === state.concurrency ? `${concurrency}개` : `${concurrency}개 (Vercel 브라우저 제약, 설정값 ${state.concurrency})`;
+    // Spaced requests go one at a time: two in parallel would still land as a pair.
+    const concurrency = process.env.VERCEL || spaced ? 1 : state.concurrency;
+    const concurrencyNote =
+      concurrency === state.concurrency
+        ? `${concurrency}개`
+        : spaced
+          ? `1개 · 상품 사이 ${pacing!.requestGapMinSec}~${pacing!.requestGapMaxSec}초 쉼`
+          : `${concurrency}개 (Vercel 브라우저 제약, 설정값 ${state.concurrency})`;
+    if (quiet && targets.length > 0) {
+      runLog(`쉬는 시간(${pacing!.quietStartHour}~${pacing!.quietEndHour}시)이라 아직 정보가 없는 상품만 수집합니다.`);
+    }
     runLog(`===== 수집 시작 · 대상 ${targets.length}개 · 동시 처리 ${concurrencyNote}${cutoffNote} =====`);
     runLog(`환경: ${process.env.VERCEL ? `Vercel(${process.env.VERCEL_REGION ?? "region 미상"})` : "로컬"} · ${resourceSnapshot()}`);
     if (targets.length > 0) runLog(`대상 목록: ${targets.map((t) => t.id).join(", ")}`);
@@ -368,6 +439,12 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
       runLog(`처리 상한(${MAX_PRODUCTS_PER_TICK}개)에 도달했습니다. 남은 상품은 다음 실행에서 오래 기다린 순서대로 처리합니다.`);
     }
     const total = targets.length;
+    const progress: CycleProgress = { startedAt: startedAt.toISOString(), total, done: 0, succeeded: 0, failed: 0, probing };
+    const reportProgress = () => {
+      state.progress = { ...progress };
+      options.onProgress?.(state.progress);
+    };
+    if (total > 0) reportProgress();
 
     let botBlockedCount = 0;
     let circuitBroken = false;
@@ -375,11 +452,18 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
     const results = await withRenderSession(() =>
       mapWithConcurrency(targets, concurrency, (p) => collectOne(p, `(${targets.indexOf(p) + 1}/${total})`, collector), {
       onResult: (r) => {
+        progress.done += 1;
+        if (r.status === "SUCCESS") progress.succeeded += 1;
+        else progress.failed += 1;
+        reportProgress();
         if (r.status === "BOT_BLOCKED") {
           botBlockedCount += 1;
           if (probing || botBlockedCount >= BOT_BLOCK_CIRCUIT_BREAKER_THRESHOLD) circuitBroken = true;
         }
       },
+      gapMs: spaced
+        ? () => (pacing!.requestGapMinSec + Math.random() * (pacing!.requestGapMaxSec - pacing!.requestGapMinSec)) * 1000
+        : undefined,
       shouldAbort: () => {
         if (circuitBroken) return true;
         if (options.stopStartingAt != null && Date.now() >= options.stopStartingAt) {
@@ -459,6 +543,7 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
     return null;
   } finally {
     state.cycleInProgress = false;
+    state.progress = null;
     const finishedAt = new Date();
     state.lastRunFinishedAt = finishedAt.toISOString();
     state.lastRunDurationMs = finishedAt.getTime() - startedAt.getTime();
@@ -476,6 +561,7 @@ export async function getSchedulerStatus(): Promise<SchedulerStatus> {
     lastRunFinishedAt: state.lastRunFinishedAt,
     lastRunDurationMs: state.lastRunDurationMs,
     lastRunResults: state.lastRunResults,
+    progress: state.progress,
   };
 }
 
@@ -483,6 +569,7 @@ export interface SchedulerConfigInput {
   intervalMs?: number;
   enabled?: boolean;
   concurrency?: number;
+  pacing?: PacingSettings;
 }
 
 /** Admin-facing config update — validates, applies in-memory, and persists to app_settings. */
@@ -507,10 +594,17 @@ export async function updateSchedulerConfig(input: SchedulerConfigInput): Promis
     state.enabled = input.enabled;
   }
 
+  if (input.pacing != null) {
+    const error = validatePacing(input.pacing);
+    if (error) return { error };
+    state.pacing = input.pacing;
+  }
+
   try {
     if (input.intervalMs != null) await persistIntervalMs(input.intervalMs);
     if (input.concurrency != null) await persistConcurrency(input.concurrency);
     if (input.enabled != null) await persistEnabled(input.enabled);
+    if (input.pacing != null) await persistPacing(input.pacing);
   } catch (err) {
     console.error("[price-scheduler] 설정 저장 실패 (이번 프로세스에는 적용됐지만 재시작 시 사라질 수 있음):", err);
     return { error: "설정이 적용됐지만 저장에는 실패했습니다. 서버 재시작 시 초기화될 수 있습니다." };

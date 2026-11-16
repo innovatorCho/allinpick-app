@@ -18,6 +18,10 @@ import { updateSchedulingMeta, getProductById, listDueTrackedProducts } from "@/
 import { endBotBlockWaitNow, getBotBlockCooldown, startBotBlockCooldown } from "@/lib/domain/botBlockCooldown";
 import { runOneCycle, getSchedulerStatus, updateSchedulerConfig } from "@/lib/priceScheduler";
 import { ensureUsersSeeded } from "@/lib/domain/users";
+import { getDb } from "@/lib/db/client";
+import { saveWorkerStatus, shouldCollectInline, type CycleProgress } from "@/lib/domain/workerStatus";
+import { queueProductForUser } from "@/lib/domain/collection";
+import { isQuietHour } from "@/lib/domain/schedulerSettings";
 import type { CollectResult } from "@/collectors/oliveyoung/types";
 
 const dbPath = process.env.DATABASE_PATH;
@@ -211,6 +215,133 @@ async function main() {
     const processedIds = status.lastRunResults.map((r) => r.productId);
     assert.deepEqual(processedIds, ["CB0101", "CB0102", "CB0103"], "threshold 미만이면 전부 끝까지 처리되어야 함");
     assert.equal(await getBotBlockCooldown(), null, "1건으로는 대기가 시작되지 않음");
+  });
+
+  await test("차단 대기 상태를 DB에서 못 읽으면(연결 오류) 수집하지 않고 건너뜀 — '대기 없음'으로 보고 전부 요청하면 안 됨", async () => {
+    await startBotBlockCooldown();
+    await endBotBlockWaitNow(); // 확인 차례: 원래라면 상품 1개만 요청해야 하는 상태
+    await registerDue("CB0201", 50, now, stubSuccess("CB0201"));
+    await registerDue("CB0202", 40, now, stubSuccess("CB0202"));
+
+    await getDb();
+    const client = globalThis.__allinpickDbClient!;
+    const original = client.execute.bind(client);
+    // Only the cooldown read fails, like the real blip where the product query right after it succeeded.
+    client.execute = (async (stmt: { sql: string; args?: unknown[] }) => {
+      if (Array.isArray(stmt.args) && stmt.args.includes("collect.botBlockCooldown") && stmt.sql.startsWith("SELECT")) {
+        throw new Error("fetch failed");
+      }
+      return original(stmt as unknown as Parameters<typeof original>[0]);
+    }) as typeof client.execute;
+    const calls: string[] = [];
+    try {
+      assert.equal(await runOneCycle(recording(calls, new Set())), null);
+    } finally {
+      client.execute = original;
+    }
+    assert.deepEqual(calls, [], "어떤 상품도 요청하지 않아야 함");
+    assert.ok(await getBotBlockCooldown(), "대기 상태도 그대로 남아야 함");
+  });
+
+  await test("수집 중 진행 상황(전체/완료/성공/실패)을 시작과 상품마다 알려주고, 끝나면 상태에서 지움", async () => {
+    await updateSchedulerConfig({ concurrency: 1 });
+    // 앞 테스트의 대기를 풀고 시작 (확인 요청 1개 성공 → 해제)
+    await endBotBlockWaitNow();
+    await runOneCycle(stubWithBlocks(new Set()));
+    assert.equal(await getBotBlockCooldown(), null);
+    // 앞 테스트들이 남긴 대기 상품을 먼저 모두 처리해서, 아래 실행은 새로 넣은 3개만 대상이 되게 함
+    await runOneCycle(stubWithBlocks(new Set()));
+    assert.equal((await listDueTrackedProducts(new Date().toISOString())).length, 0);
+
+    await registerDue("CB0301", 50, now, stubSuccess("CB0301"));
+    await registerDue("CB0302", 40, now, stubSuccess("CB0302"));
+    await registerDue("CB0303", 30, now, stubSuccess("CB0303"));
+    const seen: CycleProgress[] = [];
+    await runOneCycle(stubWithBlocks(new Set(["CB0302"])), { onProgress: (p) => seen.push({ ...p }) });
+    assert.deepEqual(
+      seen.map((p) => [p.done, p.succeeded, p.failed]),
+      [[0, 0, 0], [1, 1, 0], [2, 1, 1], [3, 2, 1]]
+    );
+    assert.ok(seen.every((p) => p.total === 3 && !p.probing));
+    assert.equal((await getSchedulerStatus()).progress, null, "끝나면 진행 중 표시가 없어야 함");
+  });
+
+  await test("확인할 상품이 없으면 진행 상황을 알리지 않음 (대기 중에 '수집 중'으로 보이면 안 됨)", async () => {
+    // 앞 테스트에서 차단된 CB0302는 벌점 없이 대기로 남으므로 먼저 처리
+    await runOneCycle(stubWithBlocks(new Set()));
+    const seen: CycleProgress[] = [];
+    await runOneCycle(stubWithBlocks(new Set()), { onProgress: (p) => seen.push(p), quietWhenIdle: true });
+    assert.equal(seen.length, 0);
+  });
+
+  const kstHour = Number(new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Seoul", hour: "numeric", hourCycle: "h23" }).format(new Date()));
+  const pacing = (gap: number, quiet: [number, number]) => ({
+    requestGapMinSec: gap,
+    requestGapMaxSec: gap,
+    quietStartHour: quiet[0],
+    quietEndHour: quiet[1],
+  });
+  const noQuiet: [number, number] = [0, 0];
+
+  await test("쉬는 시간 판정: 자정을 넘는 구간(23~6시)도 맞고, 시작=끝이면 꺼짐", () => {
+    const at = (h: number) => new Date(Date.UTC(2026, 0, 1, (h + 15) % 24)); // KST = UTC+9
+    assert.equal(isQuietHour({ quietStartHour: 2, quietEndHour: 7 }, at(3)), true);
+    assert.equal(isQuietHour({ quietStartHour: 2, quietEndHour: 7 }, at(7)), false);
+    assert.equal(isQuietHour({ quietStartHour: 23, quietEndHour: 6 }, at(0)), true);
+    assert.equal(isQuietHour({ quietStartHour: 23, quietEndHour: 6 }, at(12)), false);
+    assert.equal(isQuietHour({ quietStartHour: 4, quietEndHour: 4 }, at(4)), false);
+  });
+
+  await test("잘못된 요청 간격·쉬는 시간은 거부", async () => {
+    assert.ok((await updateSchedulerConfig({ pacing: pacing(-1, noQuiet) })).error);
+    assert.ok((await updateSchedulerConfig({ pacing: { ...pacing(10, noQuiet), requestGapMinSec: 30 } })).error, "최소 > 최대");
+    assert.ok((await updateSchedulerConfig({ pacing: pacing(0, [24, 3]) })).error);
+  });
+
+  await test("수집 프로그램 실행 중: 프로그램은 상품 사이 간격을 두고 하나씩 수집", async () => {
+    await updateSchedulerConfig({ concurrency: 3, pacing: pacing(1, noQuiet) });
+    await registerDue("CB0401", 50, now, stubSuccess("CB0401"));
+    await registerDue("CB0402", 40, now, stubSuccess("CB0402"));
+    await registerDue("CB0403", 30, now, stubSuccess("CB0403"));
+    const startedAt: number[] = [];
+    const timed: Collector = async (url) => {
+      startedAt.push(Date.now());
+      return stubWithBlocks(new Set())(url);
+    };
+    await runOneCycle(timed, { asWorker: true });
+    assert.equal(startedAt.length, 3);
+    for (let i = 1; i < startedAt.length; i++) {
+      assert.ok(startedAt[i] - startedAt[i - 1] >= 950, `요청 사이 간격 ${startedAt[i] - startedAt[i - 1]}ms (1초 이상이어야 함)`);
+    }
+  });
+
+  await test("쉬는 시간엔 수집 프로그램이 아직 정보가 없는 새 상품만 수집", async () => {
+    await updateSchedulerConfig({ pacing: pacing(0, [kstHour, (kstHour + 1) % 24]) });
+    await registerDue("CB0501", 50, now, stubSuccess("CB0501")); // 정보 있음 → 쉬는 시간엔 건너뜀
+    await queueProductForUser("https://www.oliveyoung.co.kr/store/goods/getGoodsDetail.do?goodsNo=CB0502", "user-a"); // 새 상품
+    const calls: string[] = [];
+    await runOneCycle(recording(calls, new Set()), { asWorker: true });
+    assert.deepEqual(calls, ["CB0502"]);
+    await updateSchedulerConfig({ pacing: pacing(0, noQuiet) });
+    calls.length = 0;
+    await runOneCycle(recording(calls, new Set()), { asWorker: true });
+    assert.deepEqual(calls, ["CB0501"], "쉬는 시간이 끝나면 나머지도 수집");
+  });
+
+  await test("수집 프로그램이 켜져 있으면 다른 곳(로컬 서버 자동 실행 등)은 수집하지 않음 — 두 곳에서 동시에 요청하지 않게", async () => {
+    await registerDue("CB0601", 50, now, stubSuccess("CB0601"));
+    const at = new Date().toISOString();
+    await saveWorkerStatus({ host: "test", startedAt: at, lastPollAt: at, cycleStartedAt: null, progress: null, stoppedAt: null, lastRun: null });
+    const calls: string[] = [];
+    assert.equal(await runOneCycle(recording(calls, new Set())), null);
+    assert.deepEqual(calls, []);
+    assert.equal(await shouldCollectInline(), false, "등록·가격 다시 확인도 바로 수집하지 않고 프로그램에 맡김");
+
+    await runOneCycle(recording(calls, new Set()), { asWorker: true });
+    assert.deepEqual(calls, ["CB0601"], "수집 프로그램 자신은 수집");
+
+    await saveWorkerStatus({ host: "test", startedAt: at, lastPollAt: at, cycleStartedAt: null, progress: null, stoppedAt: at, lastRun: null });
+    assert.equal(await shouldCollectInline(), true, "프로그램이 꺼지면 이 서버가 다시 직접 수집");
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);

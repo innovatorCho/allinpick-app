@@ -6,7 +6,7 @@ import { requireAdmin } from "@/lib/session";
 import { setCuratorUrl, getProductById, deleteProduct, markDueNow } from "@/lib/domain/products";
 import { recollectProduct } from "@/lib/domain/collection";
 import { withLoggedCollection } from "@/lib/collectionRun";
-import { canCollectHere } from "@/lib/collectMode";
+import { shouldCollectInline } from "@/lib/domain/workerStatus";
 import { collectOliveYoungProductServerless } from "@/collectors/oliveyoung/serverlessProductCollector";
 import { generateSampleData } from "@/lib/domain/seed";
 import { runSchedulerNow, updateSchedulerConfig } from "@/lib/priceScheduler";
@@ -75,7 +75,7 @@ export interface RecollectState {
 
 export async function recollectProductAction(productId: string): Promise<void> {
   await requireAdmin();
-  if (canCollectHere()) {
+  if (await shouldCollectInline()) {
     await withLoggedCollection("recollect", `가격 다시 확인 · ${productId}`, () => recollectProduct(productId));
   } else {
     await markDueNow(productId); // the collector worker picks it up on its next pass (lib/collectMode.ts)
@@ -136,7 +136,14 @@ export async function updateSchedulerConfigAction(
     return { error: "올바른 동시 처리 개수를 입력해주세요." };
   }
 
-  const result = await updateSchedulerConfig({ intervalMs: minutes * 60_000, concurrency });
+  const pacing = {
+    requestGapMinSec: Number(formData.get("gapMinSec") ?? NaN),
+    requestGapMaxSec: Number(formData.get("gapMaxSec") ?? NaN),
+    quietStartHour: Number(formData.get("quietStartHour") ?? NaN),
+    quietEndHour: Number(formData.get("quietEndHour") ?? NaN),
+  };
+
+  const result = await updateSchedulerConfig({ intervalMs: minutes * 60_000, concurrency, pacing });
   if (result.error) return { error: result.error };
 
   revalidatePath("/admin/schedule");

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
 import { recordError } from "@/lib/domain/errorLogs";
 import { withLoggedCollection } from "@/lib/collectionRun";
-import { canCollectHere } from "@/lib/collectMode";
+import { shouldCollectInline } from "@/lib/domain/workerStatus";
 import { newRunId, runLog, withRunLog } from "@/lib/runLog";
 import {
   InvalidOliveYoungUrlError,
@@ -44,7 +44,7 @@ export async function registerProductAction(
   let productId: string;
   try {
     const description = `상품 등록 · ${url} · 사용자 ${user.id}`;
-    if (canCollectHere()) {
+    if (await shouldCollectInline()) {
       const result = await withLoggedCollection("register", description, () => registerProductForUser(url, user.id));
       productId = result.product.id;
     } else {

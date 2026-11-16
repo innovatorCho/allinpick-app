@@ -4,7 +4,8 @@ import { ProductCard } from "@/components/ProductCard";
 import { RegisterProductForm } from "@/components/RegisterProductForm";
 import { OliveYoungCrawlResults } from "@/components/OliveYoungCrawlResults";
 import { getCurrentUser } from "@/lib/session";
-import { canCollectHere } from "@/lib/collectMode";
+import { shouldCollectInline } from "@/lib/domain/workerStatus";
+import { getSiteSettings } from "@/lib/domain/siteSettings";
 
 const URL_LIKE = /^https?:\/\//i;
 
@@ -19,6 +20,9 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
   const allProducts = await listAllProducts();
   // Crawl diagnostics and raw error text are for operators, not shoppers.
   const isAdmin = (await getCurrentUser())?.role === "admin";
+  const { registeringNotice } = await getSiteSettings();
+  // Only where this server opens OliveYoung itself and the collector worker isn't (one source of requests at a time).
+  const collectInline = results.length === 0 && query !== "" && !isUrl ? await shouldCollectInline() : false;
 
   return (
     <div className="flex flex-col gap-4">
@@ -43,7 +47,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
             상품 링크를 입력하셨네요. 아래에서 바로 등록하고 가격 알림을 받아보세요.
           </p>
-          <RegisterProductForm defaultUrl={query} />
+          <RegisterProductForm defaultUrl={query} registeringNotice={registeringNotice} />
         </div>
       ) : query === "" ? (
         allProducts.length === 0 ? (
@@ -60,7 +64,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
         )
       ) : results.length === 0 ? (
         <div className="flex flex-col gap-4">
-          {canCollectHere() ? (
+          {collectInline ? (
             <>
               <p className="text-sm text-zinc-500">&quot;{query}&quot; 상품을 올리브영에서 찾아볼게요.</p>
               <Suspense
@@ -79,7 +83,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
                 &quot;{query}&quot;와(과) 일치하는 상품이 아직 없어요. 올리브영에서 상품 링크를 복사해 붙여넣으면 바로
                 등록하고 가격 알림을 받을 수 있어요.
               </p>
-              <RegisterProductForm />
+              <RegisterProductForm registeringNotice={registeringNotice} />
             </div>
           )}
           {allProducts.length > 0 && (

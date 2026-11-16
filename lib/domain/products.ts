@@ -245,14 +245,19 @@ export async function listTrackedProducts(): Promise<Product[]> {
  * prioritizing the longest-waiting products keeps each tick's runtime
  * bounded and ensures nothing starves — see MAX_PRODUCTS_PER_TICK.
  */
-export async function listDueTrackedProducts(nowIso: string, limit?: number): Promise<Product[]> {
+export async function listDueTrackedProducts(
+  nowIso: string,
+  limit?: number,
+  /** Only products with no data yet (quiet hours: someone is still waiting for those). */
+  onlyUncollected = false
+): Promise<Product[]> {
   const db = await getDb();
   const rows = (await db
     .prepare(
       `SELECT * FROM (
          SELECT DISTINCT p.* FROM products p
          INNER JOIN user_tracking t ON t.product_id = p.oliveyoung_product_id
-         WHERE p.next_check_at IS NULL OR p.next_check_at <= ?
+         WHERE (p.next_check_at IS NULL OR p.next_check_at <= ?)${onlyUncollected ? " AND p.sale_price IS NULL" : ""}
        )
        ORDER BY next_check_at ASC
        LIMIT ?`

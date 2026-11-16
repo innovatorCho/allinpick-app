@@ -1,4 +1,5 @@
 import { getSetting, setSetting } from "./settings";
+import { canCollectHere } from "@/lib/collectMode";
 
 /**
  * What the collector worker (scripts/worker.ts) last reported about itself,
@@ -26,6 +27,17 @@ export interface CycleSummary {
   priceDrops: number;
 }
 
+/** A run in progress, counted as products finish. */
+export interface CycleProgress {
+  startedAt: string;
+  total: number;
+  done: number;
+  succeeded: number;
+  failed: number;
+  /** The single-product check after a bot-block wait. */
+  probing: boolean;
+}
+
 export interface WorkerStatus {
   /** Computer name, to tell which machine is collecting. */
   host: string;
@@ -34,6 +46,8 @@ export interface WorkerStatus {
   lastPollAt: string;
   /** Set while a run is collecting products. */
   cycleStartedAt: string | null;
+  /** Live counts of the run in progress; absent from reports by older workers. */
+  progress?: CycleProgress | null;
   /** Set when the worker was stopped normally (Ctrl+C), as opposed to the machine going to sleep. */
   stoppedAt: string | null;
   /** Last cycle that actually had products to collect; idle polls don't replace it. */
@@ -51,6 +65,22 @@ export async function getWorkerStatus(): Promise<WorkerStatus | null> {
     return JSON.parse(raw) as WorkerStatus;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Whether this web server should open OliveYoung itself (registration,
+ * admin re-check, keyword search, local cron). Only where it can collect at
+ * all, and never while the collector worker is online: requests from two
+ * places at once doubled the load and got the connection blocked. If the
+ * worker's state can't be read, assume it's online.
+ */
+export async function shouldCollectInline(): Promise<boolean> {
+  if (!canCollectHere()) return false;
+  try {
+    return !isWorkerOnline(await getWorkerStatus());
+  } catch {
+    return false;
   }
 }
 

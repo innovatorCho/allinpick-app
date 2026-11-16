@@ -9,6 +9,8 @@ import { AWAITING_INFO_LABEL, collectStatusLabel, isAwaitingFirstCollection } fr
 import { getSiteSettings } from "@/lib/domain/siteSettings";
 import { PriceChart } from "@/components/PriceChart";
 import { AutoRefresh } from "@/components/AutoRefresh";
+import { CollectingNotice } from "@/components/CollectingNotice";
+import { AdminOnlyNote } from "@/components/AdminOnlyNote";
 import { TrackButton } from "@/components/TrackButton";
 import { TargetPriceForm } from "@/components/TargetPriceForm";
 
@@ -74,26 +76,20 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
         )}
       </div>
 
-      {awaitingInfo && (
-        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-800 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200">
-          {awaitingNotice && <p className="whitespace-pre-line break-keep">{awaitingNotice}</p>}
-          {isAdmin && collectionFailed && (
-            <p className="mt-1 text-xs">
-              {collectStatusLabel(product.lastCollectStatus)}: {product.lastCollectError}
-            </p>
-          )}
-        </div>
-      )}
+      {awaitingInfo && awaitingNotice && <CollectingNotice message={awaitingNotice} />}
 
       {collectionFailed && !awaitingInfo && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
           <p>최신 가격을 불러오지 못해 마지막으로 확인된 가격을 보여드리고 있어요.</p>
-          {isAdmin && (
-            <p className="mt-1 text-xs">
-              {collectStatusLabel(product.lastCollectStatus)}: {product.lastCollectError}
-            </p>
-          )}
         </div>
+      )}
+
+      {isAdmin && collectionFailed && (
+        <AdminOnlyNote>
+          <p>
+            마지막 수집 결과 · {collectStatusLabel(product.lastCollectStatus)}: {product.lastCollectError}
+          </p>
+        </AdminOnlyNote>
       )}
 
       {!awaitingInfo && (

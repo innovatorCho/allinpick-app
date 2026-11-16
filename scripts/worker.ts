@@ -36,18 +36,28 @@ const status: WorkerStatus = {
   startedAt: new Date().toISOString(),
   lastPollAt: new Date().toISOString(),
   cycleStartedAt: null,
+  progress: null,
   stoppedAt: null,
   lastRun: null,
 };
 
-/** A DB blip while reporting must never stop collection. */
-async function reportStatus(): Promise<void> {
-  status.lastPollAt = new Date().toISOString();
-  try {
-    await saveWorkerStatus(status);
-  } catch (err) {
-    console.error("[worker] 상태 기록 실패 (수집은 계속합니다):", err instanceof Error ? err.message : err);
-  }
+let lastReport: Promise<void> = Promise.resolve();
+
+/**
+ * A DB blip while reporting must never stop collection. Reports are
+ * chained so a slow progress write can't land after a newer one (and, say,
+ * bring back a finished run's progress bar).
+ */
+function reportStatus(): Promise<void> {
+  lastReport = lastReport.then(async () => {
+    status.lastPollAt = new Date().toISOString();
+    try {
+      await saveWorkerStatus(status);
+    } catch (err) {
+      console.error("[worker] 상태 기록 실패 (수집은 계속합니다):", err instanceof Error ? err.message : err);
+    }
+  });
+  return lastReport;
 }
 
 let stopping = false;
@@ -103,9 +113,20 @@ async function main(): Promise<void> {
   const heartbeat = setInterval(() => void reportStatus(), POLL_INTERVAL_MS);
 
   while (!stopping) {
-    status.cycleStartedAt = new Date().toISOString();
-    const summary = await runOneCycle(undefined, { quietWhenIdle: true, reloadSettings: true });
+    const summary = await runOneCycle(undefined, {
+      quietWhenIdle: true,
+      reloadSettings: true,
+      asWorker: true,
+      // Reported right away (not on the 30s heartbeat) so the admin page's
+      // progress bar moves with each product.
+      onProgress: (progress) => {
+        status.cycleStartedAt = progress.startedAt;
+        status.progress = progress;
+        void reportStatus();
+      },
+    });
     status.cycleStartedAt = null;
+    status.progress = null;
     if (summary) status.lastRun = summary;
     await flushKakaoBatches();
     await reportStatus();

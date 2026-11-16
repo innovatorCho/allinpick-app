@@ -1,6 +1,7 @@
 import { crawlOliveYoungByKeyword } from "@/lib/domain/searchCrawl";
 import { collectStatusLabel } from "@/lib/collectStatusLabels";
 import { ProductCard } from "./ProductCard";
+import { AdminOnlyNote } from "./AdminOnlyNote";
 
 const STATUS_MESSAGE: Record<string, string> = {
   NO_MATCHES: "올리브영에서도 일치하는 상품을 찾지 못했어요. 다른 검색어로 시도해보세요.",
@@ -34,8 +35,12 @@ export async function OliveYoungCrawlResults({
       {outcome.status !== "SUCCESS" && (
         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
           <p>{STATUS_MESSAGE[outcome.status] ?? "지금은 올리브영에서 상품을 불러올 수 없어요. 잠시 후 다시 시도해주세요."}</p>
-          {showDiagnostics && outcome.error && <p className="mt-1 text-xs">{outcome.error}</p>}
         </div>
+      )}
+      {showDiagnostics && outcome.error && (
+        <AdminOnlyNote>
+          <p>{outcome.error}</p>
+        </AdminOnlyNote>
       )}
 
       {outcome.status === "SUCCESS" && outcome.products.length > 0 && (
@@ -50,7 +55,8 @@ export async function OliveYoungCrawlResults({
       {/* Raw crawl diagnostics — this is an MVP built to verify technical feasibility (AGENTS.md §0/§23),
           so showing exactly what the crawl did is more useful here than hiding it behind a clean summary. */}
       {showDiagnostics && (
-      <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
+      <AdminOnlyNote>
+      <details>
         <summary className="cursor-pointer select-none font-medium text-zinc-700 dark:text-zinc-300">
           크롤링 상세 결과 보기
         </summary>
@@ -89,6 +95,7 @@ export async function OliveYoungCrawlResults({
           )}
         </dl>
       </details>
+      </AdminOnlyNote>
       )}
     </div>
   );

@@ -29,7 +29,7 @@ export default async function HomePage() {
             <p className="text-sm text-zinc-500">관심 상품을 등록하면 가격이 내려갈 때 알려드려요</p>
           </div>
         </div>
-        <ProductEntryForm help={site.homeEntryHelp} />
+        <ProductEntryForm help={site.homeEntryHelp} registeringNotice={site.registeringNotice} />
       </section>
 
       <section className="flex flex-col gap-3">
