@@ -28,7 +28,8 @@ export type SiteSettingKey =
   | "pushIosNotice"
   | "pushWelcomeMessage"
   | "homeEntryHelp"
-  | "registeringNotice";
+  | "registeringNotice"
+  | "userGuide";
 
 export interface SiteSettingField {
   key: SiteSettingKey;
@@ -41,6 +42,13 @@ export interface SiteSettingField {
   multiline: boolean;
   maxLength: number;
   type?: "email" | "url";
+  /** Textarea height in the admin form (default 3). */
+  rows?: number;
+  /**
+   * Long texts: the admin textarea starts filled with the text in effect, so
+   * admins edit it rather than retype it from the placeholder.
+   */
+  editInPlace?: boolean;
 }
 
 export const SITE_SETTING_FIELDS: SiteSettingField[] = [
@@ -208,6 +216,77 @@ export const SITE_SETTING_FIELDS: SiteSettingField[] = [
     multiline: true,
     maxLength: 200,
   },
+  {
+    key: "userGuide",
+    env: "SITE_USER_GUIDE",
+    label: "이용 가이드",
+    help: "이용 가이드(/guide) 화면의 본문이에요. '## 제목'은 소제목, '- '는 점 목록, '1. '은 번호 목록, 빈 줄은 문단 구분, '![설명](이미지 주소)'는 이미지가 돼요(기본 이미지는 /guide/ 아래에 있어요).",
+    defaultValue: `올인픽은 올리브영 상품의 가격을 대신 지켜보다가, 가격이 내려가면 알려드리는 서비스예요.
+사고 싶은 상품을 등록해두면 매번 직접 들어가 확인하지 않아도 돼요.
+
+## 1. 로그인하기
+- 화면 오른쪽 위의 로그인을 누르고 카카오 또는 Google 계정으로 로그인해요.
+- 카카오톡으로 알림을 받으려면 카카오로 로그인해주세요.
+- 내 휴대폰이나 PC라면 '로그인 상태 유지'를 체크하면 편해요.
+
+![로그인 화면](/guide/login.png)
+
+## 2. 관심 상품 등록하기
+1. 올리브영 앱이나 웹에서 사고 싶은 상품을 열어요.
+2. 공유 버튼을 누르고 '링크 복사'를 선택해요.
+
+![올리브영 앱에서 공유 → 링크 복사](/guide/share.png)
+
+3. 올인픽 홈 화면 입력창에 붙여넣고 '알림 받기' 버튼을 눌러요.
+
+![홈 화면 입력창에 링크 붙여넣기](/guide/home-entry.png)
+
+- 상품 정보를 가져오는 데 몇 초 정도 걸려요. 화면을 닫지 말고 잠시 기다려주세요.
+- 상품 이름을 입력하면 다른 사람이 이미 등록한 상품에서 찾아드려요. 찾는 상품이 있으면 눌러서 '가격 추적하기'를 누르면 돼요.
+- 상품 정보가 바로 나오지 않으면 준비되는 대로 채워져요. 잠시 후 다시 들어와 확인해주세요.
+
+## 3. 목표 가격 정하기
+- 상품 화면에서 '가격 추적하기'를 누른 뒤, 원하는 가격을 입력하고 '알림 설정'을 누르세요.
+- 가격이 목표 가격 이하로 내려가면 따로 알려드려요.
+- 목표 가격을 정하지 않아도 가격이 내려갈 때마다 알림을 받아요.
+
+![가격 추적하기와 목표 가격 설정](/guide/tracking.png)
+
+## 4. 알림 받는 방법
+![이런 알림을 받아요](/guide/alerts.png)
+
+- 카카오톡: 카카오로 로그인하면 가격이 내려갔을 때 카카오톡 '나와의 채팅'으로 알려드려요. 여러 상품이 한꺼번에 내려가면 한 번에 모아서 보내드려요.
+- 기기 알림: '내 관심상품' 화면의 '이 기기에서 알림 받기'를 누르면 휴대폰이나 PC로 바로 알림이 와요. 휴대폰과 PC에서 각각 켤 수 있어요.
+
+![이 기기에서 알림 받기 → 허용](/guide/push.png)
+- 아이폰은 Safari 아래쪽 공유 버튼 → '홈 화면에 추가'를 누른 뒤, 홈 화면에 생긴 아이콘으로 들어와야 기기 알림을 켤 수 있어요.
+
+![아이폰: 홈 화면에 추가하기](/guide/ios.png)
+- 받은 알림은 '내 관심상품' 화면의 알림 목록에서도 다시 볼 수 있어요.
+
+## 5. 가격 보는 법
+- 상품 화면에서 현재 가격과 최근 가격 변화를 그래프로 볼 수 있어요.
+
+![상품 화면의 가격 그래프](/guide/price-chart.png)
+- '▼최저가'는 올인픽이 가격을 지켜본 뒤로 가장 싼 가격, '▲최고가'는 가장 비싼 가격이에요. 상품 목록에도 같은 표시가 붙어요.
+- '최저가 대비 +6%'처럼 나오면 지금 가격이 그동안의 최저가보다 그만큼 비싸다는 뜻이에요.
+- 가격은 일정한 간격으로 확인해요. 올리브영의 실제 가격과 잠시 차이가 날 수 있으니, 구매 전에는 올리브영에서 꼭 다시 확인해주세요.
+
+## 6. 추적 그만하기
+- 상품 화면에서 '추적 중 (해제하기)'를 누르면 더 이상 알림이 오지 않아요.
+- 기기 알림만 끄려면 '내 관심상품' 화면에서 '알림 끄기'를 누르세요.
+
+## 자주 묻는 질문
+- 알림이 오지 않아요: 카카오로 로그인했는지, 기기 알림을 켰는지 확인해주세요. 가격이 내려가지 않았다면 알림도 오지 않아요.
+- 가격이 실제와 달라요: 가격은 주기적으로 확인하기 때문에 방금 바뀐 가격은 조금 늦게 반영될 수 있어요.
+- 상품 정보가 '수집 중'으로 나와요: 올리브영에서 정보를 가져오는 중이에요. 잠시 후 다시 확인해주세요.
+- 그 밖에 궁금한 점은 화면 아래 문의 메일로 보내주세요.`,
+    required: false,
+    multiline: true,
+    maxLength: 8000,
+    rows: 24,
+    editInPlace: true,
+  },
 ];
 
 export type SiteSettingSource = "admin" | "env" | "default" | "none";
@@ -276,7 +355,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export async function saveSiteSettings(input: Partial<Record<SiteSettingKey, string>>): Promise<{ error?: string }> {
   const cleaned: [SiteSettingField, string][] = [];
   for (const field of SITE_SETTING_FIELDS) {
-    const raw = input[field.key];
+    const raw = input[field.key]?.replace(/\r\n?/g, "\n");
     if (raw === undefined) continue;
     const value = field.multiline ? raw.trim() : raw.replace(/\s+/g, " ").trim();
     if (value.length > field.maxLength) {
@@ -288,7 +367,10 @@ export async function saveSiteSettings(input: Partial<Record<SiteSettingKey, str
     if (value && field.type === "url" && !/^https?:\/\/\S+$/.test(value)) {
       return { error: `${field.label}은(는) http:// 또는 https://로 시작하는 주소로 입력해주세요.` };
     }
-    cleaned.push([field, value]);
+    // Saving the text already in effect (an editInPlace field left as is)
+    // keeps following the env var / default instead of freezing a copy.
+    const fallback = process.env[field.env]?.trim() || field.defaultValue;
+    cleaned.push([field, value === fallback ? "" : value]);
   }
 
   for (const [field, value] of cleaned) {

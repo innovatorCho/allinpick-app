@@ -54,9 +54,13 @@ export function SiteSettingsForm({
               <textarea
                 id={field.key}
                 name={field.key}
-                rows={3}
+                rows={field.rows ?? 3}
                 maxLength={field.maxLength}
-                defaultValue={state.values?.[field.key] ?? adminValues[field.key] ?? ""}
+                defaultValue={
+                  state.values?.[field.key] ??
+                  adminValues[field.key] ??
+                  (field.editInPlace ? (effectiveValues[field.key] ?? "") : "")
+                }
                 placeholder={fallback ?? ""}
                 className={inputClass}
               />

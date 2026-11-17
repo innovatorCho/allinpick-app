@@ -60,6 +60,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                   </span>
                 )}
               </Link>
+              <Link href="/guide" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
+                가이드
+              </Link>
               {currentUser?.role === "admin" && (
                 <Link href="/admin" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
                   관리자
@@ -86,6 +89,9 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
             <div className="flex flex-wrap gap-x-4 gap-y-1">
               <Link href="/privacy" className="font-semibold text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100">
                 개인정보 처리방침
+              </Link>
+              <Link href="/guide" className="hover:text-zinc-900 dark:hover:text-zinc-100">
+                이용 가이드
               </Link>
               {site.contactEmail && (
                 <a href={`mailto:${site.contactEmail}`} className="hover:text-zinc-900 dark:hover:text-zinc-100">

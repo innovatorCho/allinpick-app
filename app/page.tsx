@@ -30,6 +30,9 @@ export default async function HomePage() {
           </div>
         </div>
         <ProductEntryForm help={site.homeEntryHelp} registeringNotice={site.registeringNotice} />
+        <Link href="/guide" className="self-start text-sm text-zinc-500 underline hover:text-zinc-900 dark:hover:text-zinc-100">
+          처음이신가요? 이용 가이드 보기
+        </Link>
       </section>
 
       <section className="flex flex-col gap-3">
