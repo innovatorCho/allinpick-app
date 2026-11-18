@@ -45,7 +45,7 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
     <div className="flex flex-col gap-6">
       {awaitingInfo && <AutoRefresh intervalMs={15_000} stopAfterMs={10 * 60_000} />}
       <div className="flex gap-4">
-        <div className="h-32 w-32 flex-shrink-0 overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
+        <div className="h-24 w-24 flex-shrink-0 overflow-hidden sm:h-32 sm:w-32 rounded-lg bg-zinc-100 dark:bg-zinc-800">
           {product.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover" />
@@ -58,10 +58,10 @@ export default async function ProductDetailPage({ params }: PageProps<"/product/
             <p className="text-xs text-zinc-500">{trackerCount.toLocaleString("ko-KR")}명이 가격을 지켜보는 중</p>
           </div>
         ) : (
-          <div className="flex flex-col justify-center gap-1">
+          <div className="flex min-w-0 flex-col justify-center gap-1">
             <p className="text-sm text-zinc-500">{product.brand}</p>
-            <h1 className="text-lg font-semibold">{product.name}</h1>
-            <div className="flex items-baseline gap-2">
+            <h1 className="break-words text-base font-semibold sm:text-lg">{product.name}</h1>
+            <div className="flex flex-wrap items-baseline gap-x-2 whitespace-nowrap">
               {product.discountRate ? (
                 <span className="text-xl font-bold text-red-600">{product.discountRate}%</span>
               ) : null}

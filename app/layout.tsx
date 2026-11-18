@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
@@ -25,6 +25,14 @@ export const metadata: Metadata = {
   description: "올리브영 관심 상품을 등록하면 가격이 내려갈 때 알려드려요.",
 };
 
+// Tints the phone browser's address bar / status bar to match the header.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#09090b" },
+  ],
+};
+
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const currentUser = await getCurrentUser();
   const unreadCount = currentUser ? await countUnread(currentUser.id) : 0;
@@ -38,13 +46,16 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="min-h-full flex flex-col bg-zinc-50 dark:bg-black">
         <header className="border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <nav className="flex items-center gap-4 text-sm font-medium">
-              <Link href="/" className="flex items-center gap-1.5 font-semibold text-zinc-900 dark:text-zinc-50">
+          <div className="mx-auto flex max-w-4xl items-center justify-between gap-2 px-4 py-3">
+            {/* One row on every phone: tighter gaps below sm, and the links
+                scroll sideways instead of pushing 로그인 onto a second line. */}
+            <nav className="scrollbar-none flex min-w-0 items-center gap-3 overflow-x-auto whitespace-nowrap text-sm font-medium sm:gap-4">
+              <Link href="/" aria-label="올인픽 홈" className="flex shrink-0 items-center gap-1.5 font-semibold text-zinc-900 dark:text-zinc-50">
                 <span className="h-6 w-6 shrink-0 overflow-hidden rounded-md">
                   <BrandMarkSvg />
                 </span>
-                올인픽
+                {/* Logo only on the narrowest phones (iPhone SE size), so every link fits. */}
+                <span className="hidden min-[360px]:inline">올인픽</span>
               </Link>
               <Link href="/search" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
                 검색

@@ -32,7 +32,8 @@ export function ProductEntryForm({ help, registeringNotice }: { help: string | n
 
   return (
     <form action={action} onSubmit={handleSubmit} className="flex flex-col gap-2">
-      <div className="flex gap-2">
+      {/* Stacked on phones so the placeholder isn't cut off and the button is a full-width tap target. */}
+      <div className="flex flex-col gap-2 sm:flex-row">
         <input
           type="text"
           name="url"
@@ -40,12 +41,12 @@ export function ProductEntryForm({ help, registeringNotice }: { help: string | n
           onChange={(e) => setValue(e.target.value)}
           placeholder="상품 링크 붙여넣기 · 상품명 검색"
           aria-label="올리브영 상품 링크 또는 검색어"
-          className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
+          className="min-w-0 flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-3 sm:py-2.5 text-sm outline-none focus:border-zinc-500 dark:border-zinc-700 dark:bg-zinc-900"
         />
         <button
           type="submit"
           disabled={pending || isEmpty}
-          className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50 ${
+          className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-3 text-sm sm:py-2.5 font-medium disabled:opacity-50 ${
             isLink || isEmpty
               ? "bg-emerald-600 text-white hover:bg-emerald-700"
               : "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"

@@ -125,9 +125,11 @@ function Sparkline({
   const hasRange = allTimeMin !== allTimeMax;
 
   return (
+    // Height follows width (no letterboxing on wide screens), capped so a PC
+    // monitor doesn't get a giant chart with oversized labels.
     <svg
       viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
-      className="h-28 w-full overflow-visible"
+      className="mx-auto h-auto w-full max-w-lg overflow-visible"
       role="img"
       aria-label="최근 가격 추이 그래프"
     >
