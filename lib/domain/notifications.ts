@@ -164,6 +164,24 @@ export async function listUsersWithPriceDropCountToday(sinceIso: string): Promis
   }));
 }
 
+export interface UserNotificationItem extends AppNotification {
+  /** null when the product was deleted since. */
+  productName: string | null;
+}
+
+/** Newest first, with product names in one query — for the notification modal. */
+export async function listRecentNotificationsForUser(userId: string, limit = 50): Promise<UserNotificationItem[]> {
+  const db = await getDb();
+  const rows = (await db
+    .prepare(
+      `SELECT n.*, p.name AS product_name FROM notifications n
+       LEFT JOIN products p ON p.oliveyoung_product_id = n.product_id
+       WHERE n.user_id = ? ORDER BY n.created_at DESC LIMIT ?`
+    )
+    .all(userId, limit)) as unknown as (NotificationRow & { product_name: string | null })[];
+  return rows.map((row) => ({ ...toNotification(row), productName: row.product_name }));
+}
+
 export async function countUnread(userId: string): Promise<number> {
   const db = await getDb();
   const row = (await db

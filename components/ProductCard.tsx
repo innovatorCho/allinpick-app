@@ -13,11 +13,14 @@ const PRICE_COLOR_BY_STATUS: Record<string, string> = {
 export async function ProductCard({
   product,
   trackingUserCount,
+  range: knownRange,
 }: {
   product: Product;
   trackingUserCount?: number;
+  /** Pass when the caller already loaded it, to skip a second query. */
+  range?: { min: number; max: number } | null;
 }) {
-  const range = await getPriceRange(product.id);
+  const range = knownRange !== undefined ? knownRange : await getPriceRange(product.id);
   const status = getPriceRangeStatus(product.salePrice, range);
   const priceColorClass = (status && PRICE_COLOR_BY_STATUS[status]) || "text-zinc-900 dark:text-zinc-100";
   // Registered but not collected yet: show it as in progress, not as a product called "상품 정보 확인 중".

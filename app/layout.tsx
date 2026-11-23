@@ -9,6 +9,7 @@ import { countUnread } from "@/lib/domain/notifications";
 import { countOpenErrors } from "@/lib/domain/errorLogs";
 import { getSiteSettings } from "@/lib/domain/siteSettings";
 import { KakaoChannelButton } from "@/components/KakaoChannelButton";
+import { NotificationsButton } from "@/components/NotificationsButton";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -60,16 +61,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/search" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
                 검색
               </Link>
-              <Link
-                href="/my"
-                className="relative text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
-              >
+              <Link href="/my" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
                 내 관심상품
-                {unreadCount > 0 && (
-                  <span className="ml-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                    {unreadCount > 99 ? "99+" : unreadCount}
-                  </span>
-                )}
               </Link>
               <Link href="/guide" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
                 가이드
@@ -88,7 +81,10 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
                 </Link>
               )}
             </nav>
-            <AuthStatus currentUser={currentUser} />
+            <div className="flex shrink-0 items-center gap-1">
+              {currentUser && <NotificationsButton unreadCount={unreadCount} />}
+              <AuthStatus currentUser={currentUser} />
+            </div>
           </div>
         </header>
         <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-4 py-6">{children}</main>
