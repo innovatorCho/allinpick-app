@@ -344,6 +344,32 @@ async function main() {
     assert.equal(await shouldCollectInline(), true, "프로그램이 꺼지면 이 서버가 다시 직접 수집");
   });
 
+  await test("수집 프로그램이 꺼져 대신 수집할 때(paced)도 같은 간격 — 다음 실행 첫 요청까지 간격 유지", async () => {
+    await updateSchedulerConfig({ concurrency: 3, pacing: pacing(1, noQuiet) });
+    await registerDue("CB0701", 50, now, stubSuccess("CB0701"));
+    await registerDue("CB0702", 40, now, stubSuccess("CB0702"));
+    const startedAt: number[] = [];
+    const timed: Collector = async (url) => {
+      startedAt.push(Date.now());
+      return stubWithBlocks(new Set())(url);
+    };
+    await runOneCycle(timed, { paced: true });
+    assert.equal(startedAt.length, 2, "한 번에 하나씩, 둘 다 수집");
+    assert.ok(startedAt[1] - startedAt[0] >= 950, `요청 사이 간격 ${startedAt[1] - startedAt[0]}ms`);
+
+    await registerDue("CB0703", 30, now, stubSuccess("CB0703"));
+    await runOneCycle(timed, { paced: true });
+    assert.equal(startedAt.length, 3);
+    assert.ok(startedAt[2] - startedAt[1] >= 950, `실행이 바뀌어도 간격 유지: ${startedAt[2] - startedAt[1]}ms`);
+
+    await updateSchedulerConfig({ pacing: pacing(0, [kstHour, (kstHour + 1) % 24]) });
+    await registerDue("CB0704", 50, now, stubSuccess("CB0704"));
+    const calls: string[] = [];
+    await runOneCycle(recording(calls, new Set()), { paced: true });
+    assert.deepEqual(calls, [], "쉬는 시간엔 정보가 이미 있는 상품은 수집하지 않음");
+    await updateSchedulerConfig({ pacing: pacing(0, noQuiet) });
+  });
+
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed > 0) process.exitCode = 1;
 }

@@ -2,13 +2,14 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/session";
 import { getProductById, countTrackers } from "@/lib/domain/products";
-import { listPriceHistory, listCollectLogs } from "@/lib/domain/priceHistory";
+import { listPriceHistory, listCollectLogs, getCollectLogSummary, COLLECT_LOG_PAGE_SIZE } from "@/lib/domain/priceHistory";
 import { formatDateTime, formatKrw } from "@/lib/format";
-import { collectStatusLabel } from "@/lib/collectStatusLabels";
 import { CuratorUrlForm } from "@/components/CuratorUrlForm";
 import { RecollectButton } from "@/components/RecollectButton";
 import { DeleteProductButton } from "@/components/DeleteProductButton";
 import { ServerlessCrawlerTestTool } from "@/components/ServerlessCrawlerTestTool";
+import { CollectLogPanel } from "@/components/CollectLogPanel";
+import { collectStatusLabel } from "@/lib/collectStatusLabels";
 
 const STATUS_LABEL: Record<string, string> = {
   initial: "정상",
@@ -27,9 +28,10 @@ export default async function AdminProductDetailPage({ params }: PageProps<"/adm
   const product = await getProductById(id);
   if (!product) notFound();
 
-  const [history, logs, trackerCount] = await Promise.all([
+  const [history, logs, logSummary, trackerCount] = await Promise.all([
     listPriceHistory(id).then((h) => [...h].reverse()),
-    listCollectLogs(id),
+    listCollectLogs(id, COLLECT_LOG_PAGE_SIZE),
+    getCollectLogSummary(id),
     countTrackers(id),
   ]);
 
@@ -134,18 +136,14 @@ export default async function AdminProductDetailPage({ params }: PageProps<"/adm
 
       <div className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">수집 시도 로그</h2>
-        <ul className="flex flex-col gap-1 text-sm">
-          {logs.map((log) => (
-            <li key={log.id} className="flex justify-between border-b border-zinc-100 py-1 dark:border-zinc-900">
-              <span className="text-xs text-zinc-500">{formatDateTime(log.createdAt)}</span>
-              <span className={log.status === "SUCCESS" ? "text-emerald-600" : "text-amber-700 dark:text-amber-400"}>
-                {collectStatusLabel(log.status)}
-                {log.errorMessage ? ` — ${log.errorMessage}` : ""}
-              </span>
-            </li>
-          ))}
-          {logs.length === 0 && <li className="text-zinc-500">수집 시도 기록이 없습니다.</li>}
-        </ul>
+        <CollectLogPanel
+          productId={product.id}
+          initialLogs={logs}
+          total={logSummary.total}
+          lastSuccessAt={logSummary.lastSuccessAt}
+          consecutiveFailures={product.consecutiveFailures}
+          pageSize={COLLECT_LOG_PAGE_SIZE}
+        />
       </div>
     </div>
   );

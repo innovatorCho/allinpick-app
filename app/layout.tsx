@@ -8,6 +8,7 @@ import { BrandMarkSvg } from "@/components/BrandMark";
 import { countUnread } from "@/lib/domain/notifications";
 import { countOpenErrors } from "@/lib/domain/errorLogs";
 import { getSiteSettings } from "@/lib/domain/siteSettings";
+import { getBaseUrl } from "@/lib/auth/providers";
 import { KakaoChannelButton } from "@/components/KakaoChannelButton";
 import { NotificationsButton } from "@/components/NotificationsButton";
 
@@ -21,10 +22,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "올인픽 - 올리브영 최저가 알림",
-  description: "올리브영 관심 상품을 등록하면 가격이 내려갈 때 알려드려요.",
-};
+/** Accepts the bare code or the whole `<meta name="google-site-verification" content="...">` tag. */
+function googleVerificationCode(value: string | null): string | undefined {
+  if (!value) return undefined;
+  const fromTag = value.match(/content\s*=\s*["']([^"']+)["']/i);
+  return (fromTag ? fromTag[1] : value).trim() || undefined;
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const site = await getSiteSettings();
+  const google = googleVerificationCode(site.googleSiteVerification);
+  return {
+    metadataBase: new URL(getBaseUrl()),
+    title: "올인픽 - 올리브영 최저가 알림",
+    description: "올리브영 관심 상품을 등록하면 가격이 내려갈 때 알려드려요.",
+    // Google Search Console ownership check (admin: 사이트 정보 → 구글 서치콘솔 확인 코드).
+    ...(google ? { verification: { google } } : {}),
+  };
+}
 
 // Tints the phone browser's address bar / status bar to match the header.
 export const viewport: Viewport = {

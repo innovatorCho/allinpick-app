@@ -64,12 +64,27 @@ export async function insertCollectLog(input: {
     .run(input.productId, input.status, input.errorMessage, input.createdAt);
 }
 
-export async function listCollectLogs(productId: string, limit = 20): Promise<CollectLogEntry[]> {
+/** Collect-attempt logs shown per step on the admin product page. */
+export const COLLECT_LOG_PAGE_SIZE = 20;
+
+export async function listCollectLogs(productId: string, limit = 20, offset = 0): Promise<CollectLogEntry[]> {
   const db = await getDb();
   const rows = (await db
-    .prepare(`SELECT * FROM collect_logs WHERE product_id = ? ORDER BY created_at DESC LIMIT ?`)
-    .all(productId, limit)) as unknown as CollectLogRow[];
+    .prepare(`SELECT * FROM collect_logs WHERE product_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`)
+    .all(productId, limit, offset)) as unknown as CollectLogRow[];
   return rows.map(toCollectLog);
+}
+
+/** Total attempts and the last successful one, for the admin log summary. */
+export async function getCollectLogSummary(productId: string): Promise<{ total: number; lastSuccessAt: string | null }> {
+  const db = await getDb();
+  const row = (await db
+    .prepare(
+      `SELECT COUNT(*) AS total, MAX(CASE WHEN status = 'SUCCESS' THEN created_at END) AS last_success
+       FROM collect_logs WHERE product_id = ?`
+    )
+    .get(productId)) as { total: number; last_success: string | null };
+  return { total: row.total, lastSuccessAt: row.last_success };
 }
 
 /**

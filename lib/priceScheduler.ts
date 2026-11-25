@@ -129,6 +129,8 @@ interface SchedulerState {
   lastRunResults: SchedulerRunResult[];
   progress: CycleProgress | null;
   pacing: PacingSettings;
+  /** When this process last finished a request to OliveYoung, so the gap also holds across runs. */
+  lastRequestAt: number | null;
 }
 
 function getState(): SchedulerState {
@@ -150,6 +152,7 @@ function getState(): SchedulerState {
         quietStartHour: DEFAULT_QUIET_START_HOUR,
         quietEndHour: DEFAULT_QUIET_END_HOUR,
       },
+      lastRequestAt: null,
     };
   }
   return globalThis.__allinpickSchedulerState;
@@ -204,6 +207,8 @@ async function mapWithConcurrency<T, R>(
     shouldAbort?: () => boolean;
     /** Pause before each item after a worker's first, in ms. */
     gapMs?: () => number;
+    /** Pause before the very first item (the rest of a gap left over from the previous run). */
+    initialDelayMs?: number;
   }
 ): Promise<(R | undefined)[]> {
   const results: (R | undefined)[] = new Array(items.length);
@@ -212,9 +217,11 @@ async function mapWithConcurrency<T, R>(
   async function worker(): Promise<void> {
     for (let started = 0; ; started += 1) {
       if (options?.shouldAbort?.()) return;
-      if (started > 0 && options?.gapMs && nextIndex < items.length) {
-        await new Promise((resolve) => setTimeout(resolve, options.gapMs!()));
-        if (options.shouldAbort?.()) return;
+      const wait =
+        started > 0 && options?.gapMs ? options.gapMs() : started === 0 && nextIndex === 0 ? (options?.initialDelayMs ?? 0) : 0;
+      if (wait > 0 && nextIndex < items.length) {
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (options?.shouldAbort?.()) return;
       }
       const current = nextIndex;
       nextIndex += 1;
@@ -336,6 +343,14 @@ export interface RunCycleOptions {
    * two places at once: that doubled requests and bursts and got us blocked.
    */
   asWorker?: boolean;
+  /**
+   * Apply the same pacing without being the worker: the local `next dev`
+   * self-ping and the admin button, which collect whenever the worker is
+   * off. Without it they sent pairs of requests at once and ran through the
+   * night (seen 2026-11-23~25 while the worker was stopped). Tests leave it
+   * off so they don't sleep between products.
+   */
+  paced?: boolean;
 }
 
 /** Returns what this run did, or null when it didn't collect anything (paused, skipped, nothing due). */
@@ -407,7 +422,7 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
   try {
     // After a block's wait: one product only, to see whether it has lifted.
     const probing = phase === "probing";
-    const pacing = options.asWorker ? state.pacing : null;
+    const pacing = options.asWorker || options.paced ? state.pacing : null;
     const quiet = pacing != null && isQuietHour(pacing, startedAt);
     const targets = await listDueTrackedProducts(startedAt.toISOString(), probing ? 1 : MAX_PRODUCTS_PER_TICK, quiet);
     const spaced = pacing != null && pacing.requestGapMaxSec > 0;
@@ -452,6 +467,7 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
     const results = await withRenderSession(() =>
       mapWithConcurrency(targets, concurrency, (p) => collectOne(p, `(${targets.indexOf(p) + 1}/${total})`, collector), {
       onResult: (r) => {
+        state.lastRequestAt = Date.now();
         progress.done += 1;
         if (r.status === "SUCCESS") progress.succeeded += 1;
         else progress.failed += 1;
@@ -464,6 +480,12 @@ async function runOneCycleLogged(collector: Collector | undefined, options: RunC
       gapMs: spaced
         ? () => (pacing!.requestGapMinSec + Math.random() * (pacing!.requestGapMaxSec - pacing!.requestGapMinSec)) * 1000
         : undefined,
+      // Runs from the self-ping can end and restart within seconds of each
+      // other; keep at least the minimum gap across that boundary too.
+      initialDelayMs:
+        spaced && state.lastRequestAt != null
+          ? Math.max(0, state.lastRequestAt + pacing!.requestGapMinSec * 1000 - Date.now())
+          : 0,
       shouldAbort: () => {
         if (circuitBroken) return true;
         if (options.stopStartingAt != null && Date.now() >= options.stopStartingAt) {
@@ -627,7 +649,7 @@ export function runSchedulerNow(): void {
   const stopStartingAt = Date.now() + 300_000 - CYCLE_START_CUTOFF_MARGIN_MS;
   runAfterResponse(async () => {
     try {
-      await runOneCycle(undefined, { stopStartingAt });
+      await runOneCycle(undefined, { stopStartingAt, paced: true });
     } catch (err) {
       await recordError({ source: "scheduler:manual-run", error: err });
     }

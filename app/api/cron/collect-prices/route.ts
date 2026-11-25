@@ -32,7 +32,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // Stop starting new products early enough that in-flight ones finish and
   // get saved before the platform kills the function.
-  await runOneCycle(undefined, { stopStartingAt: Date.now() + maxDuration * 1000 - CYCLE_START_CUTOFF_MARGIN_MS });
+  // paced: when the worker is off, a local `next dev` collects here and must
+  // keep the same gaps and quiet hours (lib/priceScheduler.ts RunCycleOptions).
+  await runOneCycle(undefined, { stopStartingAt: Date.now() + maxDuration * 1000 - CYCLE_START_CUTOFF_MARGIN_MS, paced: true });
   if (await shouldCollectInline()) await flushKakaoBatches(); // local dev: the worker does this in production
   const status = await getSchedulerStatus();
   runLog(`응답 보냄 · 총 ${seconds(Date.now() - received)}`, "collect-api");

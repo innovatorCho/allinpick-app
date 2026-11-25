@@ -22,7 +22,8 @@ import {
 import { saveSiteSettings, SITE_SETTING_FIELDS, type SiteSettingKey } from "@/lib/domain/siteSettings";
 import { endBotBlockWaitNow } from "@/lib/domain/botBlockCooldown";
 import { saveKakaoBatchSettings } from "@/lib/domain/kakaoBatchSettings";
-import type { NotificationType } from "@/lib/domain/types";
+import type { CollectLogEntry, NotificationType } from "@/lib/domain/types";
+import { COLLECT_LOG_PAGE_SIZE, listCollectLogs } from "@/lib/domain/priceHistory";
 
 /** Shared across every FormState-returning action below — a DB-connection
  * failure (network blip to Turso) shouldn't surface as a raw stack trace;
@@ -91,6 +92,12 @@ export interface DeleteProductState {
 }
 
 /** Admin "상품 삭제": removes the product with its history and every user's tracking of it. */
+/** Older collect-attempt logs for the admin product page's "더 보기". */
+export async function loadCollectLogsAction(productId: string, offset: number): Promise<CollectLogEntry[]> {
+  await requireAdmin();
+  return listCollectLogs(productId, COLLECT_LOG_PAGE_SIZE, Math.max(0, Math.floor(offset)));
+}
+
 export async function deleteProductAction(productId: string): Promise<DeleteProductState> {
   await requireAdmin();
   try {

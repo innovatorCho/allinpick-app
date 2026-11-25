@@ -29,7 +29,8 @@ export type SiteSettingKey =
   | "pushWelcomeMessage"
   | "homeEntryHelp"
   | "registeringNotice"
-  | "userGuide";
+  | "userGuide"
+  | "googleSiteVerification";
 
 export interface SiteSettingField {
   key: SiteSettingKey;
@@ -286,6 +287,16 @@ export const SITE_SETTING_FIELDS: SiteSettingField[] = [
     maxLength: 8000,
     rows: 24,
     editInPlace: true,
+  },
+  {
+    key: "googleSiteVerification",
+    env: "GOOGLE_SITE_VERIFICATION",
+    label: "구글 서치콘솔 확인 코드",
+    help: "서치콘솔 'URL 접두어' 속성 → 확인 방법 'HTML 태그'에 나오는 content 값을 넣어요. <meta ...> 태그를 통째로 붙여넣어도 돼요. 저장하면 모든 페이지에 확인 태그가 들어가요.",
+    defaultValue: null,
+    required: false,
+    multiline: false,
+    maxLength: 300,
   },
 ];
 
